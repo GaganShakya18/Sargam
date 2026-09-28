@@ -1,18 +1,64 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from config.database import get_db
+from repositories.user_repository import UserRepository
+from schemas.user_schema import UserCreate, UserLogin, UserOut
+from services.auth_service import AuthService
+from utils.jwt import decode_access_token
 
 router = APIRouter()
+security = HTTPBearer()
 
 
-@router.post("/register")
-def register_user():
-    return {"message": "Register endpoint placeholder"}
+@router.post("/register", response_model=UserOut)
+def register_user(payload: UserCreate, db=Depends(get_db)):
+    try:
+        user = AuthService.register_user(
+            db,
+            email=payload.email,
+            username=payload.username,
+            password=payload.password,
+            full_name=payload.full_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return user
 
 
 @router.post("/login")
-def login_user():
-    return {"message": "Login endpoint placeholder"}
+def login_user(payload: UserLogin, db=Depends(get_db)):
+    user = AuthService.authenticate_user(db, payload.email, payload.password)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+    token = AuthService.create_token_for_user(user.email)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+            "full_name": user.full_name,
+        },
+    }
 
 
-@router.get("/me")
-def get_current_user():
-    return {"message": "Current user endpoint placeholder"}
+@router.get("/me", response_model=UserOut)
+def get_current_user(
+    request: Request,
+    db=Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    token = credentials.credentials
+    payload = decode_access_token(token)
+    if not payload or not payload.get("sub"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+    user = UserRepository(db).get_by_email(payload["sub"])
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    return user

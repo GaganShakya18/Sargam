@@ -1,11 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from config.database import Base, engine
+from models import *  # noqa: F401,F403
 from routes.auth import router as auth_router
 from routes.songs import router as songs_router
 from routes.playlists import router as playlists_router
 from routes.search import router as search_router
 from routes.users import router as users_router
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="MyMusicApp API",
