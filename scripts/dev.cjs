@@ -26,14 +26,7 @@ function getDatabaseUrl() {
     } catch {}
   }
 
-  if (!configuredUrl || !/^postgres(?:ql)?(?:\+[^:]+)?:\/\//i.test(configuredUrl)) {
-    throw new Error(
-      `PostgreSQL is required, but ${backendEnvPath} does not configure a PostgreSQL DATABASE_URL. ` +
-      'Set it to postgresql://<user>:<password>@<host>:5432/mymusicapp; SQLite is not used.',
-    );
-  }
-
-  return new URL(configuredUrl);
+  return configuredUrl || 'sqlite:///./app.db';
 }
 
 function getPostgresWindowsService() {
@@ -178,60 +171,69 @@ async function main() {
   }
 
   const apiUrl = new URL(apiBaseUrl);
-  const databaseUrl = getDatabaseUrl();
-  const databaseHost = databaseUrl.hostname.replace(/^\[|\]$/g, '');
-  const databasePort = Number(databaseUrl.port || 5432);
-  let databaseReady = await canConnect(databaseHost, databasePort);
-
-  if (!databaseReady && process.platform === 'win32' && ['localhost', '127.0.0.1', '::1'].includes(databaseHost)) {
-    const service = await getPostgresWindowsService();
-    if (service.state === 'Running') {
-      console.log(`Reusing running PostgreSQL Windows service '${service.name}'.`);
-    } else if (service.state === 'Stopped') {
-      if (service.error) {
-        if (/access is denied|requires elevation|privilege/i.test(service.error)) {
-          console.error(
-            `Administrator permission is required to start PostgreSQL service '${service.name}'. ` +
-            'Start it once from Windows Services, then run npm run dev again.',
-          );
-        } else {
-          console.error(`Could not start PostgreSQL service '${service.name}': ${service.error}`);
-        }
-      } else {
-        console.log(`Started PostgreSQL Windows service '${service.name}'.`);
-      }
-    } else if (service.state === 'missing') {
-      console.error('No local PostgreSQL Windows service was found.');
-    } else if (service.state === 'ambiguous') {
-      console.error(`Found ${service.count} PostgreSQL Windows services; refusing to choose one automatically.`);
-    } else if (service.error) {
-      console.error(`Could not inspect PostgreSQL Windows services: ${service.error}`);
-    }
-
-    const canServiceBecomeReady = service.state === 'Running'
-      || service.state === 'StartPending'
-      || (service.state === 'Stopped' && !service.error);
-    if (canServiceBecomeReady) {
-      const deadline = Date.now() + 20000;
-      while (!databaseReady && Date.now() < deadline) {
-        await new Promise((done) => setTimeout(done, 500));
-        databaseReady = await canConnect(databaseHost, databasePort);
-      }
-    }
+  const configuredDatabaseUrl = getDatabaseUrl();
+  const isPostgresUrl = /^postgres(?:ql)?(?:\+[^:]+)?:\/\//i.test(configuredDatabaseUrl);
+  const isSqliteUrl = /^sqlite:\/\//i.test(configuredDatabaseUrl);
+  if (!isPostgresUrl && !isSqliteUrl) {
+    throw new Error('Unsupported DATABASE_URL scheme for development. Use PostgreSQL or the existing SQLite fallback.');
   }
 
-  if (!databaseReady) {
-    throw new Error(
-      `PostgreSQL is not reachable at ${databaseHost}:${databasePort}. ` +
-      'Start the configured service or make sure the external database is reachable, then retry. No database data was changed.',
-    );
+  let backendDatabaseUrl = configuredDatabaseUrl;
+  if (isPostgresUrl) {
+    const databaseUrl = new URL(configuredDatabaseUrl);
+    const databaseHost = databaseUrl.hostname.replace(/^\[|\]$/g, '');
+    const databasePort = Number(databaseUrl.port || 5432);
+    let databaseReady = await canConnect(databaseHost, databasePort);
+
+    if (!databaseReady && process.platform === 'win32' && ['localhost', '127.0.0.1', '::1'].includes(databaseHost)) {
+      const service = await getPostgresWindowsService();
+      if (service.state === 'Running') {
+        console.log(`Reusing running PostgreSQL Windows service '${service.name}'.`);
+      } else if (service.state === 'Stopped' && !service.error) {
+        console.log(`Starting PostgreSQL Windows service '${service.name}'.`);
+      } else if (service.state === 'Stopped' && service.error) {
+        console.warn(`Could not start PostgreSQL service '${service.name}'; using the SQLite development fallback.`);
+      } else if (service.state === 'missing') {
+        console.warn('No local PostgreSQL service was found; using the SQLite development fallback.');
+      } else if (service.state === 'ambiguous') {
+        console.warn(`Found ${service.count} PostgreSQL services; using the SQLite development fallback.`);
+      } else if (service.error) {
+        console.warn(`Could not inspect PostgreSQL services; using the SQLite development fallback.`);
+      }
+
+      const canServiceBecomeReady = service.state === 'Running'
+        || service.state === 'StartPending'
+        || (service.state === 'Stopped' && !service.error);
+      if (canServiceBecomeReady) {
+        const deadline = Date.now() + 20000;
+        while (!databaseReady && Date.now() < deadline) {
+          await new Promise((done) => setTimeout(done, 500));
+          databaseReady = await canConnect(databaseHost, databasePort);
+        }
+      }
+    }
+
+    if (!databaseReady) {
+      console.warn(`PostgreSQL is not reachable at ${databaseHost}:${databasePort}; using the SQLite development fallback.`);
+      backendDatabaseUrl = 'sqlite:///./app.db';
+    } else {
+      console.log(`PostgreSQL is reachable at ${databaseHost}:${databasePort}.`);
+    }
+  } else {
+    console.log('Using the existing SQLite development database; PostgreSQL configuration remains unchanged.');
   }
 
   const port = await findFreePort();
-  console.log(`PostgreSQL is reachable at ${databaseHost}:${databasePort}. Starting FastAPI first.`);
+  console.log('Starting FastAPI first.');
 
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const backend = startProcess(npm, ['run', 'dev:backend'], 'backend', projectDirectory);
+  const backend = startProcess(
+    npm,
+    ['run', 'dev:backend'],
+    'backend',
+    projectDirectory,
+    { ...process.env, DATABASE_URL: backendDatabaseUrl },
+  );
   await waitFor('http://127.0.0.1:8000/health', 'FastAPI', backend);
   console.log('FastAPI health check passed. Starting Vite.');
 

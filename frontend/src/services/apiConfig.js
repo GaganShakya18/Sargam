@@ -7,7 +7,9 @@ export function resolveApiBaseUrl(
 
   if (configuredBaseUrl) {
     const configuredUrl = new URL(configuredBaseUrl);
-    if (['localhost', '127.0.0.1', '::1'].includes(hostname)) {
+    const isLoopbackHost = ['localhost', '127.0.0.1', '::1'].includes(hostname);
+    const isCapacitorWebView = hostname === 'localhost' && protocol === 'https:';
+    if (isLoopbackHost && !isCapacitorWebView) {
       configuredUrl.hostname = hostname;
       return configuredUrl.toString().replace(/\/+$/, '');
     }

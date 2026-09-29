@@ -84,7 +84,7 @@ export default function App() {
   const [showPassword, setShowPassword] = useState(false);
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
-  const [selectedSidebar, setSelectedSidebar] = useState('profile');
+  const [selectedSidebar, setSelectedSidebar] = useState(null);
   const [profileForm, setProfileForm] = useState({ username: '', full_name: '', bio: '', profile_image: '' });
   const [passwordForm, setPasswordForm] = useState({ current_password: '', new_password: '' });
 

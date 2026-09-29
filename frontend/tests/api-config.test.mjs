@@ -13,5 +13,9 @@ assert.equal(
 	resolveApiBaseUrl({ hostname: '192.168.137.1', protocol: 'http:' }, 'http://192.168.137.1:8000/api'),
 	'http://192.168.137.1:8000/api',
 );
+assert.equal(
+	resolveApiBaseUrl({ hostname: 'localhost', protocol: 'https:' }, 'http://192.168.137.1:8000/api'),
+	'http://192.168.137.1:8000/api',
+);
 
 console.log('api config tests passed');

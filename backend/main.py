@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 
 from config.database import Base, engine
 from config.settings import settings
@@ -9,6 +10,22 @@ from routes.songs import router as songs_router
 from routes.playlists import router as playlists_router
 from routes.search import router as search_router
 from routes.users import router as users_router
+
+if engine.dialect.name == "sqlite":
+    inspector = inspect(engine)
+    if inspector.has_table("users"):
+        user_columns = {column["name"] for column in inspector.get_columns("users")}
+        missing_user_columns = {
+            "bio": "VARCHAR",
+            "profile_image": "VARCHAR",
+            "account_type": "VARCHAR DEFAULT 'Free'",
+        }
+        with engine.begin() as connection:
+            for column_name, definition in missing_user_columns.items():
+                if column_name not in user_columns:
+                    connection.execute(text(
+                        f"ALTER TABLE users ADD COLUMN {column_name} {definition}"
+                    ))
 
 Base.metadata.create_all(bind=engine)
 
