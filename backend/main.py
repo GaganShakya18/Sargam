@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 
-from config.database import Base, engine
+from config.database import Base, engine, ensure_song_library_columns
 from config.settings import settings
 from models import *  # noqa: F401,F403
 from routes.auth import router as auth_router
@@ -28,6 +28,7 @@ if engine.dialect.name == "sqlite":
                     ))
 
 Base.metadata.create_all(bind=engine)
+ensure_song_library_columns()
 
 app = FastAPI(
     title="MyMusicApp API",

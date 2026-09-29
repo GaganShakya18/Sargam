@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "dev:backend": "cd backend && .\\.venv\\Scripts\\python.exe -m uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "scan:music": "backend\\.venv\\Scripts\\python.exe scripts\\scan_music.py",
     "dev:android": "node scripts/run_android_dev.cjs",
     "dev:frontend": "cd frontend && npm run dev -- --host 0.0.0.0",
     "dev": "concurrently --kill-others --names backend,frontend --prefix name --prefix-colors blue,green \"npm:dev:backend\" \"npm:dev:frontend\"",

@@ -1,33 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 import { API_BASE_URL } from './services/apiConfig';
-
-const likedSongs = [
-  { title: 'Midnight City', artist: 'M83', duration: '3:42', accent: 'linear-gradient(135deg, #ff8a00, #e52e71)' },
-  { title: 'Levitating', artist: 'Dua Lipa', duration: '3:23', accent: 'linear-gradient(135deg, #00c6ff, #0072ff)' },
-  { title: 'Sunflower', artist: 'Post Malone', duration: '2:38', accent: 'linear-gradient(135deg, #84fab0, #8fd3f4)' },
-  { title: 'Heat Waves', artist: 'Glass Animals', duration: '3:58', accent: 'linear-gradient(135deg, #f6d365, #fda085)' },
-];
-
-const playlists = [
-  { name: 'Chill Vibes', tracks: 24, mood: 'Late night' },
-  { name: 'Workout Mix', tracks: 18, mood: 'Energy boost' },
-  { name: 'Focus Flow', tracks: 31, mood: 'Deep work' },
-  { name: 'Road Trip', tracks: 15, mood: 'Weekend drive' },
-];
-
-const recommendations = [
-  { title: 'Golden Hour', artist: 'JVKE', reason: 'Because you liked Sunflower', color: '#f7b267' },
-  { title: 'Night Changes', artist: 'One Direction', reason: 'Popular with your playlist', color: '#bdb2ff' },
-  { title: 'Electric Feel', artist: 'MGMT', reason: 'Trending in Chill Vibes', color: '#90be6d' },
-  { title: 'Ocean Eyes', artist: 'Billie Eilish', reason: 'Recommended for your mood', color: '#8ecae6' },
-];
-
-const stats = [
-  { label: 'Liked songs', value: '248' },
-  { label: 'Playlists', value: '12' },
-  { label: 'Recommended', value: '36' },
-];
+import { fetchSearchResults, fetchSongs } from './services/api';
 
 const initialForm = { email: '', username: '', full_name: '', password: '' };
 const defaultPreferences = {
@@ -65,6 +39,11 @@ function getStoredActiveAccount() {
   }
 }
 
+function formatDuration(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
 export default function App() {
   const [mode, setMode] = useState('login');
   const [form, setForm] = useState(initialForm);
@@ -78,6 +57,16 @@ export default function App() {
   const [activeAccount, setActiveAccount] = useState(getStoredActiveAccount());
   const [serverHealth, setServerHealth] = useState(false);
   const [message, setMessage] = useState('');
+  const [songs, setSongs] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [songError, setSongError] = useState('');
+  const [isLoadingSongs, setIsLoadingSongs] = useState(false);
+  const [currentSong, setCurrentSong] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const audioRef = useRef(null);
+  const searchInputRef = useRef(null);
   const [isLoading, setIsLoading] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -159,6 +148,86 @@ export default function App() {
 
     fetchProfile(token);
   }, [token]);
+
+  useEffect(() => {
+    if (!token || !user) {
+      setSongs([]);
+      return undefined;
+    }
+
+    let active = true;
+    setIsLoadingSongs(true);
+    setSongError('');
+    fetchSongs()
+      .then((data) => {
+        if (active) setSongs(data.items || []);
+      })
+      .catch((error) => {
+        if (active) setSongError(error.message || 'Music library could not be loaded.');
+      })
+      .finally(() => {
+        if (active) setIsLoadingSongs(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [token, Boolean(user)]);
+
+  const handleSongSearch = async (event) => {
+    event.preventDefault();
+    setSongError('');
+    setIsLoadingSongs(true);
+    try {
+      if (!searchQuery.trim()) {
+        const data = await fetchSongs();
+        setSongs(data.items || []);
+      } else {
+        const data = await fetchSearchResults(searchQuery.trim());
+        setSongs(data.results || []);
+      }
+    } catch (error) {
+      setSongError(error.message || 'Music library could not be loaded.');
+    } finally {
+      setIsLoadingSongs(false);
+    }
+  };
+
+  const playSong = async (song) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    audio.pause();
+    setCurrentSong(song);
+    setCurrentTime(0);
+    setDuration(song.duration_seconds || 0);
+    setSongError('');
+    audio.src = `${API_BASE_URL}/songs/${encodeURIComponent(song.id)}/stream`;
+    audio.load();
+    try {
+      await audio.play();
+      setIsPlaying(true);
+    } catch {
+      setIsPlaying(false);
+      setSongError('Song could not be played.');
+    }
+  };
+
+  const togglePlayback = async () => {
+    const audio = audioRef.current;
+    if (!audio || !currentSong) return;
+    if (audio.paused) {
+      try {
+        await audio.play();
+        setIsPlaying(true);
+      } catch {
+        setSongError('Song could not be played.');
+      }
+    } else {
+      audio.pause();
+      setIsPlaying(false);
+    }
+  };
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -670,101 +739,111 @@ export default function App() {
         <main className="main-content">
           <section className="hero-card">
             <div className="hero-copy">
-              <p className="eyebrow muted">Your mix</p>
-              <h2>For you</h2>
+              <p className="eyebrow muted">Local library</p>
+              <h2>Your music</h2>
             </div>
-            <button className="primary-btn compact">Play</button>
+            <button type="button" className="primary-btn compact" onClick={() => songs[0] && playSong(songs[0])} disabled={!songs.length}>Play</button>
           </section>
 
           <section className="stats-grid">
-            {stats.map((stat) => (
-              <div key={stat.label} className="stat-box">
-                <strong>{stat.value}</strong>
-                <span>{stat.label}</span>
-              </div>
-            ))}
+            <div className="stat-box"><strong>{songs.length}</strong><span>Songs shown</span></div>
+            <div className="stat-box"><strong>{new Set(songs.map((song) => song.artist_name).filter(Boolean)).size}</strong><span>Artists</span></div>
+            <div className="stat-box"><strong>{new Set(songs.map((song) => song.audio_format).filter(Boolean)).size}</strong><span>Formats</span></div>
           </section>
 
           <section className="panel">
             <div className="section-head">
-              <h3>Made For You</h3>
-              <a href="#">View all</a>
+              <h3>Music library</h3>
+              <span className="catalog-count">{songs.length} tracks</span>
             </div>
-
-            <div className="horizontal-scroll">
-              {likedSongs.map((song) => (
-                <article key={song.title} className="album-card">
-                  <div className="cover-art" style={{ background: song.accent }}>
-                    ♫
+            <form className="catalog-search" onSubmit={handleSongSearch}>
+              <input
+                ref={searchInputRef}
+                id="music-search"
+                aria-label="Search songs, artists, albums, or genres"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search songs, artists, albums, or genres"
+              />
+              <button type="submit" className="primary-btn compact" disabled={isLoadingSongs}>{isLoadingSongs ? 'Loading' : 'Search'}</button>
+            </form>
+            {songError && <p className="catalog-status error-text" role="alert">{songError}</p>}
+            {isLoadingSongs && <p className="catalog-status">Loading music library...</p>}
+            {!isLoadingSongs && !songError && songs.length === 0 && (
+              <p className="catalog-status">{searchQuery.trim() ? 'No songs match that search.' : 'Your music library is empty. Add audio files, then run npm run scan:music.'}</p>
+            )}
+            <div className="song-list">
+              {songs.map((song) => (
+                <article key={song.id} className={currentSong?.id === song.id ? 'library-song active' : 'library-song'}>
+                  <div className="song-mark" aria-hidden="true">♫</div>
+                  <div className="library-song-info">
+                    <strong>{song.title}</strong>
+                    <span>{song.artist_name || 'Unknown Artist'}{song.album_title ? ` · ${song.album_title}` : ''}</span>
                   </div>
-                  <h4>{song.title}</h4>
-                  <p>{song.artist}</p>
+                  <span className="song-duration">{formatDuration(song.duration_seconds || 0)}</span>
+                  <button type="button" className="song-play" onClick={() => playSong(song)} aria-label={`Play ${song.title}`}>▶</button>
                 </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="panel">
-            <div className="section-head">
-              <h3>Recently Played</h3>
-              <a href="#">See all</a>
-            </div>
-
-            <div className="playlist-grid compact-list">
-              {playlists.map((playlist) => (
-                <article key={playlist.name} className="playlist-card">
-                  <div className="playlist-icon">♪</div>
-                  <div>
-                    <h4>{playlist.name}</h4>
-                    <p>{playlist.tracks} tracks</p>
-                  </div>
-                  <span>{playlist.mood}</span>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="panel">
-            <div className="section-head">
-              <h3>Recommended for you</h3>
-              <a href="#">Refresh</a>
-            </div>
-
-            <div className="recommendations-list">
-              {recommendations.map((item) => (
-                <div key={item.title} className="recommendation-item">
-                  <div className="mini-cover" style={{ background: item.color }}>
-                    ♫
-                  </div>
-                  <div className="recommendation-info">
-                    <h4>{item.title}</h4>
-                    <p>{item.artist}</p>
-                  </div>
-                  <small>{item.reason}</small>
-                </div>
               ))}
             </div>
           </section>
         </main>
 
-        <div className="mini-player" aria-label="Mini player">
-          <div className="mini-cover small" style={{ background: 'linear-gradient(135deg, #8B5CF6, #EC4899)' }}>
-            ♫
+        {currentSong && (
+          <div className="mini-player" aria-label="Mini player">
+            <div className="mini-cover small" aria-hidden="true">♫</div>
+            <div className="mini-meta">
+              <strong>{currentSong.title}</strong>
+              <span>{currentSong.artist_name || 'Unknown Artist'}</span>
+            </div>
+            <button type="button" className="mini-play" onClick={togglePlayback} aria-label={isPlaying ? 'Pause' : 'Play'}>
+              {isPlaying ? '❚❚' : '▶'}
+            </button>
+            <div className="player-seek">
+              <span>{formatDuration(Math.floor(currentTime))}</span>
+              <input
+                type="range"
+                min="0"
+                max={duration || currentSong.duration_seconds || 0}
+                step="1"
+                value={Math.min(currentTime, duration || currentSong.duration_seconds || 0)}
+                aria-label="Seek within song"
+                disabled={!duration && !currentSong.duration_seconds}
+                onChange={(event) => {
+                  const nextTime = Number(event.target.value);
+                  audioRef.current.currentTime = nextTime;
+                  setCurrentTime(nextTime);
+                }}
+              />
+              <span>{formatDuration(duration || currentSong.duration_seconds || 0)}</span>
+            </div>
           </div>
-          <div className="mini-meta">
-            <strong>Golden Hour</strong>
-            <span>JVKE</span>
-          </div>
-          <button type="button" className="mini-play" aria-label="Play or pause">
-            ▶
-          </button>
-        </div>
+        )}
+        <audio
+          ref={audioRef}
+          hidden
+          onLoadedMetadata={(event) => setDuration(Math.floor(event.currentTarget.duration || 0))}
+          onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime || 0)}
+          onEnded={() => setIsPlaying(false)}
+          onError={() => {
+            if (currentSong) {
+              setIsPlaying(false);
+              setSongError('Song could not be played.');
+            }
+          }}
+        />
 
         <nav className="bottom-nav" aria-label="Main navigation">
           <button type="button" className="nav-item active">
             <span>Home</span>
           </button>
-          <button type="button" className="nav-item">
+          <button
+            type="button"
+            className="nav-item"
+            onClick={() => {
+              searchInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              searchInputRef.current?.focus();
+            }}
+          >
             <span>Search</span>
           </button>
           <button type="button" className="nav-item">

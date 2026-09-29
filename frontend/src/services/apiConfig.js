@@ -1,6 +1,7 @@
 export function resolveApiBaseUrl(
   location = typeof window !== 'undefined' ? window.location : { hostname: 'localhost', protocol: 'http:' },
   configuredBaseUrl = import.meta.env?.VITE_API_BASE_URL,
+  isNativePlatform = typeof window !== 'undefined' && window.Capacitor?.isNativePlatform?.(),
 ) {
   const hostname = location.hostname || 'localhost';
   const protocol = location.protocol || 'http:';
@@ -8,7 +9,7 @@ export function resolveApiBaseUrl(
   if (configuredBaseUrl) {
     const configuredUrl = new URL(configuredBaseUrl);
     const isLoopbackHost = ['localhost', '127.0.0.1', '::1'].includes(hostname);
-    const isCapacitorWebView = hostname === 'localhost' && protocol === 'https:';
+    const isCapacitorWebView = hostname === 'localhost' && isNativePlatform;
     if (isLoopbackHost && !isCapacitorWebView) {
       configuredUrl.hostname = hostname;
       return configuredUrl.toString().replace(/\/+$/, '');

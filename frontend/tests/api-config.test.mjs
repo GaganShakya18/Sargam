@@ -14,7 +14,11 @@ assert.equal(
 	'http://192.168.137.1:8000/api',
 );
 assert.equal(
-	resolveApiBaseUrl({ hostname: 'localhost', protocol: 'https:' }, 'http://192.168.137.1:8000/api'),
+	resolveApiBaseUrl({ hostname: 'localhost', protocol: 'https:' }, 'http://192.168.137.1:8000/api', true),
+	'http://192.168.137.1:8000/api',
+);
+assert.equal(
+	resolveApiBaseUrl({ hostname: 'localhost', protocol: 'http:' }, 'http://192.168.137.1:8000/api', true),
 	'http://192.168.137.1:8000/api',
 );
 
