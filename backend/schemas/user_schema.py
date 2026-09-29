@@ -1,5 +1,6 @@
-from pydantic import BaseModel, EmailStr
 from typing import Optional
+
+from pydantic import BaseModel, EmailStr
 
 
 class UserBase(BaseModel):
@@ -17,8 +18,47 @@ class UserLogin(BaseModel):
     password: str
 
 
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+    new_password: str
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class ProfileUpdateRequest(BaseModel):
+    email: Optional[EmailStr] = None
+    username: Optional[str] = None
+    full_name: Optional[str] = None
+    bio: Optional[str] = None
+    profile_image: Optional[str] = None
+
+
+class UserPreferencesUpdate(BaseModel):
+    audio_quality: Optional[str] = None
+    streaming_quality: Optional[str] = None
+    autoplay: Optional[bool] = None
+    crossfade: Optional[int] = None
+    explicit_content: Optional[bool] = None
+    downloads_enabled: Optional[bool] = None
+    theme: Optional[str] = None
+    dark_mode: Optional[bool] = None
+
+
+class UserPrivacyUpdate(BaseModel):
+    listening_history_enabled: Optional[bool] = None
+    search_history_enabled: Optional[bool] = None
+    profile_visible: Optional[bool] = None
+    account_visibility: Optional[str] = None
+
+
 class UserOut(UserBase):
     id: str
+    bio: Optional[str] = None
+    profile_image: Optional[str] = None
+    account_type: str = "Free"
     is_active: bool = True
 
     class Config:

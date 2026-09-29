@@ -30,5 +30,10 @@ class AuthService:
         return user
 
     @staticmethod
+    def reset_password(db, email: str, new_password: str):
+        repo = UserRepository(db)
+        return repo.update_password(email, new_password)
+
+    @staticmethod
     def create_token_for_user(user_email: str):
         return create_access_token({"sub": user_email})

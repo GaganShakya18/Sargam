@@ -1,0 +1,14 @@
+{
+  "name": "personal-spotify",
+  "private": true,
+  "scripts": {
+    "dev:backend": "cd backend && .\\.venv\\Scripts\\python.exe -m uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:android": "node scripts/run_android_dev.cjs",
+    "dev:frontend": "cd frontend && npm run dev -- --host 0.0.0.0",
+    "dev": "node scripts/dev.cjs",
+    "start": "npm run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
+  }
+}
