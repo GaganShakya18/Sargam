@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class UserBase(BaseModel):
@@ -52,6 +52,18 @@ class UserPrivacyUpdate(BaseModel):
     search_history_enabled: Optional[bool] = None
     profile_visible: Optional[bool] = None
     account_visibility: Optional[str] = None
+
+
+class SearchHistoryCreate(BaseModel):
+    query: str = Field(min_length=1, max_length=200)
+
+    @field_validator("query")
+    @classmethod
+    def normalize_query(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Search query cannot be empty")
+        return normalized
 
 
 class UserOut(UserBase):

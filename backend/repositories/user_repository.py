@@ -260,6 +260,34 @@ class UserRepository:
         self.db.commit()
         return deleted
 
+    def get_search_history(self, email: str, limit: int = 10):
+        user = self.get_by_email(email)
+        if not user:
+            raise ValueError("User not found")
+        if not self.get_privacy(email).search_history_enabled:
+            return []
+        return (
+            self.db.query(SearchHistory)
+            .filter_by(user_id=user.id)
+            .order_by(SearchHistory.searched_at.desc(), SearchHistory.id.desc())
+            .limit(limit)
+            .all()
+        )
+
+    def record_search(self, email: str, query: str):
+        user = self.get_by_email(email)
+        if not user:
+            raise ValueError("User not found")
+        if not self.get_privacy(email).search_history_enabled:
+            return False
+        self.db.query(SearchHistory).filter(
+            SearchHistory.user_id == user.id,
+            func.lower(SearchHistory.query) == query.lower(),
+        ).delete(synchronize_session=False)
+        self.db.add(SearchHistory(id=str(uuid.uuid4()), user_id=user.id, query=query))
+        self.db.commit()
+        return True
+
     def get_sessions(self, email: str):
         user = self.get_by_email(email)
         if not user:

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 import { API_BASE_URL } from './services/apiConfig';
-import { fetchSearchResults, fetchSongs } from './services/api';
+import { fetchSearchHistory, fetchSearchResults, recordSearchQuery } from './services/api';
 
 const initialForm = { email: '', username: '', full_name: '', password: '' };
 const defaultPreferences = {
@@ -59,14 +59,19 @@ export default function App() {
   const [message, setMessage] = useState('');
   const [songs, setSongs] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [hasSearched, setHasSearched] = useState(false);
+  const [recentSearches, setRecentSearches] = useState([]);
   const [songError, setSongError] = useState('');
   const [isLoadingSongs, setIsLoadingSongs] = useState(false);
   const [currentSong, setCurrentSong] = useState(null);
+  const [playbackQueue, setPlaybackQueue] = useState([]);
+  const [queueIndex, setQueueIndex] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const audioRef = useRef(null);
   const searchInputRef = useRef(null);
+  const endedHandledRef = useRef(false);
   const [isLoading, setIsLoading] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -150,41 +155,52 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
-    if (!token || !user) {
-      setSongs([]);
+    if (!token || !user || !privacy.search_history_enabled) {
+      setRecentSearches([]);
       return undefined;
     }
 
     let active = true;
-    setIsLoadingSongs(true);
-    setSongError('');
-    fetchSongs()
+    fetchSearchHistory(token)
       .then((data) => {
-        if (active) setSongs(data.items || []);
+        if (active) setRecentSearches(data.items || []);
       })
-      .catch((error) => {
-        if (active) setSongError(error.message || 'Music library could not be loaded.');
-      })
-      .finally(() => {
-        if (active) setIsLoadingSongs(false);
+      .catch(() => {
+        if (active) setRecentSearches([]);
       });
 
     return () => {
       active = false;
     };
-  }, [token, Boolean(user)]);
+  }, [token, Boolean(user), privacy.search_history_enabled]);
 
-  const handleSongSearch = async (event) => {
-    event.preventDefault();
+  const performSongSearch = async (query) => {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) {
+      setHasSearched(false);
+      setSongs([]);
+      setSongError('');
+      return;
+    }
+
     setSongError('');
     setIsLoadingSongs(true);
     try {
-      if (!searchQuery.trim()) {
-        const data = await fetchSongs();
-        setSongs(data.items || []);
-      } else {
-        const data = await fetchSearchResults(searchQuery.trim());
-        setSongs(data.results || []);
+      const data = await fetchSearchResults(normalizedQuery);
+      setSongs(data.results || []);
+      setHasSearched(true);
+      if (privacy.search_history_enabled) {
+        try {
+          const result = await recordSearchQuery(normalizedQuery, token);
+          if (result.saved) {
+            setRecentSearches((current) => [
+              { query: normalizedQuery },
+              ...current.filter((item) => item.query.toLowerCase() !== normalizedQuery.toLowerCase()),
+            ].slice(0, 10));
+          }
+        } catch {
+          setSongError('Search completed, but search history could not be saved.');
+        }
       }
     } catch (error) {
       setSongError(error.message || 'Music library could not be loaded.');
@@ -193,11 +209,20 @@ export default function App() {
     }
   };
 
-  const playSong = async (song) => {
+  const handleSongSearch = (event) => {
+    event.preventDefault();
+    performSongSearch(searchQuery);
+  };
+
+  const playSong = async (song, queue = songs) => {
     const audio = audioRef.current;
     if (!audio) return;
 
+    const nextQueue = queue.length ? queue : [song];
+    const nextIndex = nextQueue.findIndex((item) => item.id === song.id);
     audio.pause();
+    setPlaybackQueue(nextQueue);
+    setQueueIndex(nextIndex);
     setCurrentSong(song);
     setCurrentTime(0);
     setDuration(song.duration_seconds || 0);
@@ -211,6 +236,37 @@ export default function App() {
       setIsPlaying(false);
       setSongError('Song could not be played.');
     }
+  };
+
+  const playNextSong = () => {
+    const nextIndex = queueIndex + 1;
+    if (nextIndex < 0 || nextIndex >= playbackQueue.length) {
+      audioRef.current?.pause();
+      setIsPlaying(false);
+      return;
+    }
+    playSong(playbackQueue[nextIndex], playbackQueue);
+  };
+
+  const playPreviousSong = () => {
+    const audio = audioRef.current;
+    if (audio && audio.currentTime > 3) {
+      audio.currentTime = 0;
+      setCurrentTime(0);
+      return;
+    }
+    const previousIndex = queueIndex - 1;
+    if (previousIndex >= 0) playSong(playbackQueue[previousIndex], playbackQueue);
+  };
+
+  const handleSongEnded = () => {
+    if (endedHandledRef.current) return;
+    endedHandledRef.current = true;
+    if (preferences.autoplay && queueIndex + 1 < playbackQueue.length) {
+      playSong(playbackQueue[queueIndex + 1], playbackQueue);
+      return;
+    }
+    setIsPlaying(false);
   };
 
   const togglePlayback = async () => {
@@ -493,6 +549,7 @@ export default function App() {
         throw new Error(data.detail || 'Unable to clear history.');
       }
 
+      if (type === 'search') setRecentSearches([]);
       setMessage(type === 'listening' ? 'Listening history cleared.' : 'Search history cleared.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to clear history.');
@@ -745,16 +802,16 @@ export default function App() {
             <button type="button" className="primary-btn compact" onClick={() => songs[0] && playSong(songs[0])} disabled={!songs.length}>Play</button>
           </section>
 
-          <section className="stats-grid">
-            <div className="stat-box"><strong>{songs.length}</strong><span>Songs shown</span></div>
-            <div className="stat-box"><strong>{new Set(songs.map((song) => song.artist_name).filter(Boolean)).size}</strong><span>Artists</span></div>
-            <div className="stat-box"><strong>{new Set(songs.map((song) => song.audio_format).filter(Boolean)).size}</strong><span>Formats</span></div>
-          </section>
+          {hasSearched && <section className="stats-grid">
+            <div className="stat-box"><strong>{hasSearched ? songs.length : recentSearches.length}</strong><span>{hasSearched ? 'Search results' : 'Recent searches'}</span></div>
+            <div className="stat-box"><strong>{hasSearched ? new Set(songs.map((song) => song.artist_name).filter(Boolean)).size : ' '}</strong><span>{hasSearched ? 'Artists' : ' '}</span></div>
+            <div className="stat-box"><strong>{hasSearched ? new Set(songs.map((song) => song.audio_format).filter(Boolean)).size : ' '}</strong><span>{hasSearched ? 'Formats' : ' '}</span></div>
+          </section>}
 
           <section className="panel">
             <div className="section-head">
               <h3>Music library</h3>
-              <span className="catalog-count">{songs.length} tracks</span>
+              <span className="catalog-count">{hasSearched ? `${songs.length} results` : ''}</span>
             </div>
             <form className="catalog-search" onSubmit={handleSongSearch}>
               <input
@@ -762,17 +819,35 @@ export default function App() {
                 id="music-search"
                 aria-label="Search songs, artists, albums, or genres"
                 value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setSearchQuery(value);
+                  setHasSearched(false);
+                  setSongs([]);
+                  if (!value.trim()) {
+                    setSongError('');
+                  }
+                }}
                 placeholder="Search songs, artists, albums, or genres"
               />
               <button type="submit" className="primary-btn compact" disabled={isLoadingSongs}>{isLoadingSongs ? 'Loading' : 'Search'}</button>
             </form>
             {songError && <p className="catalog-status error-text" role="alert">{songError}</p>}
             {isLoadingSongs && <p className="catalog-status">Loading music library...</p>}
-            {!isLoadingSongs && !songError && songs.length === 0 && (
-              <p className="catalog-status">{searchQuery.trim() ? 'No songs match that search.' : 'Your music library is empty. Add audio files, then run npm run scan:music.'}</p>
+            {!hasSearched && !isLoadingSongs && privacy.search_history_enabled && (
+              <div className="recent-searches">
+                <h4>Recent searches</h4>
+                {recentSearches.length ? recentSearches.map((item) => (
+                  <button key={`${item.query}-${item.searched_at || ''}`} type="button" onClick={() => {
+                    setSearchQuery(item.query);
+                    performSongSearch(item.query);
+                  }}>{item.query}</button>
+                )) : <p className="catalog-status">Your recent searches will appear here.</p>}
+              </div>
             )}
-            <div className="song-list">
+            {!hasSearched && !privacy.search_history_enabled && <p className="catalog-status">Search history is turned off.</p>}
+            {hasSearched && !isLoadingSongs && !songs.length && <p className="catalog-status">No songs match that search.</p>}
+            {hasSearched && <div className="song-list">
               {songs.map((song) => (
                 <article key={song.id} className={currentSong?.id === song.id ? 'library-song active' : 'library-song'}>
                   <div className="song-mark" aria-hidden="true">♫</div>
@@ -781,10 +856,10 @@ export default function App() {
                     <span>{song.artist_name || 'Unknown Artist'}{song.album_title ? ` · ${song.album_title}` : ''}</span>
                   </div>
                   <span className="song-duration">{formatDuration(song.duration_seconds || 0)}</span>
-                  <button type="button" className="song-play" onClick={() => playSong(song)} aria-label={`Play ${song.title}`}>▶</button>
+                  <button type="button" className="song-play" onClick={() => playSong(song, songs)} aria-label={`Play ${song.title}`}>▶</button>
                 </article>
               ))}
-            </div>
+            </div>}
           </section>
         </main>
 
@@ -798,6 +873,8 @@ export default function App() {
             <button type="button" className="mini-play" onClick={togglePlayback} aria-label={isPlaying ? 'Pause' : 'Play'}>
               {isPlaying ? '❚❚' : '▶'}
             </button>
+            <button type="button" className="queue-control" onClick={playPreviousSong} aria-label="Play previous song">|◀</button>
+            <button type="button" className="queue-control" onClick={playNextSong} aria-label="Play next song">▶|</button>
             <div className="player-seek">
               <span>{formatDuration(Math.floor(currentTime))}</span>
               <input
@@ -821,9 +898,13 @@ export default function App() {
         <audio
           ref={audioRef}
           hidden
+          onPlay={() => {
+            endedHandledRef.current = false;
+            setIsPlaying(true);
+          }}
           onLoadedMetadata={(event) => setDuration(Math.floor(event.currentTarget.duration || 0))}
           onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime || 0)}
-          onEnded={() => setIsPlaying(false)}
+          onEnded={handleSongEnded}
           onError={() => {
             if (currentSong) {
               setIsPlaying(false);

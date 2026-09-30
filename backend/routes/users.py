@@ -3,7 +3,12 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from config.database import get_db
 from repositories.user_repository import UserRepository
-from schemas.user_schema import ProfileUpdateRequest, UserPrivacyUpdate, UserPreferencesUpdate
+from schemas.user_schema import (
+    ProfileUpdateRequest,
+    SearchHistoryCreate,
+    UserPrivacyUpdate,
+    UserPreferencesUpdate,
+)
 from utils.jwt import decode_access_token
 
 router = APIRouter()
@@ -162,6 +167,27 @@ def clear_search_history(db=Depends(get_db), current_user=Depends(get_authentica
     repo = UserRepository(db)
     deleted = repo.delete_search_history(current_user.email)
     return {"deleted": deleted, "message": "Search history cleared."}
+
+
+@router.get("/me/search-history")
+def get_search_history(db=Depends(get_db), current_user=Depends(get_authenticated_user)):
+    repo = UserRepository(db)
+    privacy = repo.get_privacy(current_user.email)
+    searches = repo.get_search_history(current_user.email)
+    return {
+        "enabled": privacy.search_history_enabled,
+        "items": [{"query": item.query, "searched_at": item.searched_at} for item in searches],
+    }
+
+
+@router.post("/me/search-history")
+def record_search_history(
+    payload: SearchHistoryCreate,
+    db=Depends(get_db),
+    current_user=Depends(get_authenticated_user),
+):
+    saved = UserRepository(db).record_search(current_user.email, payload.query)
+    return {"saved": saved}
 
 
 @router.get("/me/sessions")

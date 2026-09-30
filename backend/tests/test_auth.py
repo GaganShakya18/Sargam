@@ -1,11 +1,16 @@
 from unittest.mock import MagicMock
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-from config.database import Base
+from config.database import Base, get_db
 from repositories.user_repository import UserRepository
+from routes.users import router as users_router
 from services.auth_service import AuthService
+from utils.jwt import create_access_token
 from utils.hashing import verify_password
 
 
@@ -129,3 +134,81 @@ def test_profile_and_preferences_can_be_updated_for_the_authenticated_user():
         assert AuthService.authenticate_user(db, user.email, "NewSecret456!") is not None
     finally:
         db.close()
+
+
+def test_search_history_routes_respect_privacy_and_clear_history():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    test_sessions = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    database = test_sessions()
+    user = AuthService.register_user(
+        database,
+        email="history@example.com",
+        username="historyuser",
+        password="Secret123!",
+    )
+    user_email = user.email
+    database.close()
+
+    app = FastAPI()
+    app.include_router(users_router, prefix="/api/users")
+
+    def override_database():
+        request_database = test_sessions()
+        try:
+            yield request_database
+        finally:
+            request_database.close()
+
+    app.dependency_overrides[get_db] = override_database
+    headers = {"Authorization": f"Bearer {create_access_token({'sub': user_email})}"}
+
+    with TestClient(app) as client:
+        recorded = client.post(
+            "/api/users/me/search-history",
+            json={"query": "  mahiya  "},
+            headers=headers,
+        )
+        assert recorded.status_code == 200
+        assert recorded.json() == {"saved": True}
+        duplicate = client.post(
+            "/api/users/me/search-history",
+            json={"query": "MAHIYA"},
+            headers=headers,
+        )
+        assert duplicate.status_code == 200
+
+        history = client.get("/api/users/me/search-history", headers=headers)
+        assert [item["query"] for item in history.json()["items"]] == ["MAHIYA"]
+
+        disabled = client.patch(
+            "/api/users/me/privacy",
+            json={"search_history_enabled": False},
+            headers=headers,
+        )
+        assert disabled.status_code == 200
+        not_recorded = client.post(
+            "/api/users/me/search-history",
+            json={"query": "another song"},
+            headers=headers,
+        )
+        assert not_recorded.json() == {"saved": False}
+        assert client.get("/api/users/me/search-history", headers=headers).json() == {
+            "enabled": False,
+            "items": [],
+        }
+
+        client.patch(
+            "/api/users/me/privacy",
+            json={"search_history_enabled": True},
+            headers=headers,
+        )
+        cleared = client.delete("/api/users/me/search-history", headers=headers)
+        assert cleared.status_code == 200
+        assert client.get("/api/users/me/search-history", headers=headers).json()["items"] == []
+
+    engine.dispose()
