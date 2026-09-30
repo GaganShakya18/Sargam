@@ -9,7 +9,9 @@ from config.database import get_db
 from config.settings import settings
 from models.album import Album
 from models.artist import Artist
+from repositories.likes_repository import LikesRepository
 from models.song import Song
+from routes.users import get_authenticated_user
 
 router = APIRouter()
 
@@ -58,6 +60,47 @@ def get_song(song_id: str, database: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Song not found.")
     song, artist_name, album_title = row
     return song_output(song, artist_name, album_title)
+
+
+@router.post("/{song_id}/like")
+def like_song(
+    song_id: str,
+    database: Session = Depends(get_db),
+    current_user=Depends(get_authenticated_user),
+):
+    song_exists = database.query(Song.id).filter(
+        Song.id == song_id,
+        Song.file_path.is_not(None),
+    ).first()
+    if song_exists is None:
+        raise HTTPException(status_code=404, detail="Song not found.")
+    created = LikesRepository(database).add(current_user.id, song_id)
+    return {"liked": True, "created": created}
+
+
+@router.delete("/{song_id}/like")
+def unlike_song(
+    song_id: str,
+    database: Session = Depends(get_db),
+    current_user=Depends(get_authenticated_user),
+):
+    song_exists = database.query(Song.id).filter(Song.id == song_id).first()
+    if song_exists is None:
+        raise HTTPException(status_code=404, detail="Song not found.")
+    LikesRepository(database).remove(current_user.id, song_id)
+    return {"liked": False}
+
+
+@router.get("/{song_id}/like-status")
+def get_song_like_status(
+    song_id: str,
+    database: Session = Depends(get_db),
+    current_user=Depends(get_authenticated_user),
+):
+    song_exists = database.query(Song.id).filter(Song.id == song_id).first()
+    if song_exists is None:
+        raise HTTPException(status_code=404, detail="Song not found.")
+    return {"liked": LikesRepository(database).is_liked(current_user.id, song_id)}
 
 
 def _resolve_library_file(file_path):

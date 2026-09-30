@@ -9,6 +9,7 @@ from routes.auth import router as auth_router
 from routes.songs import router as songs_router
 from routes.playlists import router as playlists_router
 from routes.search import router as search_router
+from routes.recommendations import router as recommendations_router
 from routes.users import router as users_router
 
 if engine.dialect.name == "sqlite":
@@ -49,6 +50,7 @@ app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(songs_router, prefix="/api/songs", tags=["songs"])
 app.include_router(playlists_router, prefix="/api/playlists", tags=["playlists"])
 app.include_router(search_router, prefix="/api/search", tags=["search"])
+app.include_router(recommendations_router, prefix="/api/recommendations", tags=["recommendations"])
 app.include_router(users_router, prefix="/api/users", tags=["users"])
 
 

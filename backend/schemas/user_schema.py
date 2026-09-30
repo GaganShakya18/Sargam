@@ -66,6 +66,10 @@ class SearchHistoryCreate(BaseModel):
         return normalized
 
 
+class SongHistoryCreate(BaseModel):
+    song_id: str = Field(min_length=1, max_length=255)
+
+
 class UserOut(UserBase):
     id: str
     bio: Optional[str] = None

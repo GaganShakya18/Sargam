@@ -8,9 +8,13 @@ from sqlalchemy.pool import StaticPool
 from config.database import Base, get_db
 from config.settings import settings
 from models import Album, Artist, Song
+from routes.recommendations import router as recommendations_router
 from routes.search import router as search_router
 from routes.songs import router as songs_router
+from routes.users import router as users_router
+from services.auth_service import AuthService
 from services import library_scanner
+from utils.jwt import create_access_token
 
 
 @pytest.fixture
@@ -27,6 +31,12 @@ def music_client(tmp_path, monkeypatch):
     app = FastAPI()
     app.include_router(songs_router, prefix="/api/songs")
     app.include_router(search_router, prefix="/api/search")
+    from routes.recommendations import router as test_recommendations_router
+    from routes.users import router as test_users_router
+
+    app.include_router(test_users_router, prefix="/api/users")
+    app.include_router(test_recommendations_router, prefix="/api/recommendations")
+    assert any(route.path == "/api/users/me/liked-songs" for route in app.routes)
 
     def override_database():
         database = test_sessions()
@@ -162,6 +172,72 @@ def test_suggestions_require_two_characters_and_limit_results(music_client):
     bounded = client.get("/api/search/suggestions", params={"q": "mahi", "limit": 2})
     assert bounded.status_code == 200
     assert bounded.json()["suggestions"] == []
+
+
+def test_likes_are_persistent_user_scoped_and_drive_recommendations(music_client, tmp_path):
+    client, test_sessions = music_client
+    client.app.include_router(users_router, prefix="/api/users")
+    client.app.include_router(recommendations_router, prefix="/api/recommendations")
+    database = test_sessions()
+    first_user = AuthService.register_user(
+        database,
+        email="first@example.com",
+        username="firstuser",
+        password="Secret123!",
+    )
+    second_user = AuthService.register_user(
+        database,
+        email="second@example.com",
+        username="seconduser",
+        password="Secret123!",
+    )
+    artist = Artist(id="library-artist", name="Library Artist")
+    seed = Song(
+        id="liked-seed", title="Seed Track", artist_id=artist.id, genre="Jazz",
+        file_path=str(tmp_path / "seed.mp3"),
+    )
+    recommendation = Song(
+        id="recommended-track", title="Related Track", artist_id=artist.id, genre="Jazz",
+        file_path=str(tmp_path / "related.mp3"),
+    )
+    database.add_all([artist, seed, recommendation])
+    database.commit()
+    first_token = create_access_token({"sub": first_user.email})
+    second_token = create_access_token({"sub": second_user.email})
+    database.close()
+    first_headers = {"Authorization": f"Bearer {first_token}"}
+    second_headers = {"Authorization": f"Bearer {second_token}"}
+
+    liked = client.post("/api/songs/liked-seed/like", headers=first_headers)
+    assert liked.status_code == 200
+    assert liked.json()["liked"] is True
+    duplicate = client.post("/api/songs/liked-seed/like", headers=first_headers)
+    assert duplicate.json()["created"] is False
+    first_likes = client.get("/api/users/me/liked-songs", headers=first_headers)
+    second_likes = client.get("/api/users/me/liked-songs", headers=second_headers)
+    assert first_likes.status_code == 200, (
+        f"{first_likes.request.url}: {first_likes.text}; "
+        f"routes={[route.path for route in client.app.routes]}"
+    )
+    assert second_likes.status_code == 200, second_likes.text
+    assert first_likes.json()["total"] == 1
+    assert second_likes.json()["total"] == 0
+
+    history = client.post(
+        "/api/users/me/listening-history",
+        json={"song_id": "liked-seed"},
+        headers=first_headers,
+    )
+    assert history.json()["recorded"] is True
+    assert client.get("/api/users/me/listening-history", headers=first_headers).json()["items"][0]["id"] == "liked-seed"
+
+    recommendations = client.get("/api/recommendations/", headers=first_headers)
+    assert [song["id"] for song in recommendations.json()["recommendations"]] == ["recommended-track"]
+    assert client.get("/api/recommendations/", headers=second_headers).json()["recommendations"] == []
+
+    unliked = client.delete("/api/songs/liked-seed/like", headers=first_headers)
+    assert unliked.status_code == 200
+    assert client.get("/api/users/me/liked-songs", headers=first_headers).json()["items"] == []
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient

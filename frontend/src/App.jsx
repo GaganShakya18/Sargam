@@ -1,7 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 import { API_BASE_URL } from './services/apiConfig';
-import { fetchSearchHistory, fetchSearchResults, fetchSearchSuggestions, recordSearchQuery } from './services/api';
+import {
+  fetchLikedSongs,
+  fetchListeningHistory,
+  fetchPlaylists,
+  fetchRecommendations,
+  fetchSearchHistory,
+  fetchSearchResults,
+  fetchSearchSuggestions,
+  fetchSongLikeStatus,
+  recordListeningHistory,
+  recordSearchQuery,
+  updateSongLike,
+} from './services/api';
 
 const initialForm = { email: '', username: '', full_name: '', password: '' };
 const defaultPreferences = {
@@ -59,6 +71,8 @@ export default function App() {
   const [message, setMessage] = useState('');
   const [songs, setSongs] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState('home');
+  const [librarySection, setLibrarySection] = useState('liked');
   const [hasSearched, setHasSearched] = useState(false);
   const [recentSearches, setRecentSearches] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
@@ -68,6 +82,15 @@ export default function App() {
   const [songError, setSongError] = useState('');
   const [isLoadingSongs, setIsLoadingSongs] = useState(false);
   const [currentSong, setCurrentSong] = useState(null);
+  const [currentSongLiked, setCurrentSongLiked] = useState(false);
+  const [likedSongs, setLikedSongs] = useState([]);
+  const [recentTracks, setRecentTracks] = useState([]);
+  const [recommendations, setRecommendations] = useState([]);
+  const [playlists, setPlaylists] = useState([]);
+  const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
+  const [libraryError, setLibraryError] = useState('');
+  const [isUpdatingLike, setIsUpdatingLike] = useState(false);
+  const [libraryRevision, setLibraryRevision] = useState(0);
   const [playbackQueue, setPlaybackQueue] = useState([]);
   const [queueIndex, setQueueIndex] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -180,6 +203,64 @@ export default function App() {
   }, [token, Boolean(user), privacy.search_history_enabled]);
 
   useEffect(() => {
+    if (!token || !user) {
+      setLikedSongs([]);
+      setRecentTracks([]);
+      setRecommendations([]);
+      setPlaylists([]);
+      return undefined;
+    }
+
+    let active = true;
+    setIsLoadingLibrary(true);
+    setLibraryError('');
+    Promise.allSettled([
+      fetchLikedSongs(token),
+      fetchListeningHistory(token),
+      fetchRecommendations(token),
+      fetchPlaylists(token),
+    ]).then(([likesResult, historyResult, recommendationsResult, playlistsResult]) => {
+      if (!active) return;
+      if (likesResult.status === 'fulfilled') setLikedSongs(likesResult.value.items || []);
+      if (historyResult.status === 'fulfilled') setRecentTracks(historyResult.value.items || []);
+      if (recommendationsResult.status === 'fulfilled') setRecommendations(recommendationsResult.value.recommendations || []);
+      if (playlistsResult.status === 'fulfilled') setPlaylists(playlistsResult.value.items || []);
+      if ([likesResult, historyResult, recommendationsResult, playlistsResult].some((result) => result.status === 'rejected')) {
+        setLibraryError('Some library sections could not be loaded.');
+      }
+    }).finally(() => {
+      if (active) setIsLoadingLibrary(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [token, Boolean(user), libraryRevision]);
+
+  useEffect(() => {
+    if (!currentSong || !token) {
+      setCurrentSongLiked(false);
+      return undefined;
+    }
+
+    let active = true;
+    fetchSongLikeStatus(currentSong.id, token)
+      .then((data) => {
+        if (active) setCurrentSongLiked(Boolean(data.liked));
+      })
+      .catch(() => {
+        if (active) setCurrentSongLiked(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [currentSong?.id, token]);
+
+  useEffect(() => {
+    if (activeTab === 'search') searchInputRef.current?.focus();
+  }, [activeTab]);
+
+  useEffect(() => {
     const query = searchQuery.trim();
     if (query.length < 2 || hasSearched) {
       setSuggestions([]);
@@ -283,11 +364,79 @@ export default function App() {
     try {
       await audio.play();
       setIsPlaying(true);
+      setRecentTracks((current) => [song, ...current.filter((item) => item.id !== song.id)].slice(0, 30));
+      recordListeningHistory(song.id, token)
+        .then(() => setLibraryRevision((revision) => revision + 1))
+        .catch(() => {});
     } catch {
       setIsPlaying(false);
       setSongError('Song could not be played.');
     }
   };
+
+  const toggleSongLike = async (song) => {
+    if (!song || isUpdatingLike) return;
+    const wasLiked = likedSongs.some((item) => item.id === song.id);
+    const isCurrentSong = currentSong?.id === song.id;
+    const nextLiked = !wasLiked;
+    if (isCurrentSong) setCurrentSongLiked(nextLiked);
+    setLikedSongs((current) => nextLiked
+      ? [song, ...current.filter((item) => item.id !== song.id)]
+      : current.filter((item) => item.id !== song.id));
+    setIsUpdatingLike(true);
+    try {
+      await updateSongLike(song.id, nextLiked, token);
+      setLibraryRevision((revision) => revision + 1);
+    } catch {
+      if (isCurrentSong) setCurrentSongLiked(wasLiked);
+      setLikedSongs((current) => wasLiked
+        ? [song, ...current.filter((item) => item.id !== song.id)]
+        : current.filter((item) => item.id !== song.id));
+      setMessage("Couldn't update liked songs. Try again.");
+    } finally {
+      setIsUpdatingLike(false);
+    }
+  };
+
+  const playSongs = (queue, shuffle = false) => {
+    if (!queue.length) return;
+    const nextQueue = shuffle
+      ? [...queue].sort(() => Math.random() - 0.5)
+      : queue;
+    playSong(nextQueue[0], nextQueue);
+  };
+
+  const personalTracks = [...likedSongs, ...recentTracks].filter((song, index, rows) => (
+    rows.findIndex((item) => item.id === song.id) === index
+  ));
+  const personalAlbums = [...new Map(personalTracks.filter((song) => song.album_title).map((song) => [
+    `${song.album_title}-${song.artist_name}`,
+    { title: song.album_title, artist: song.artist_name, song },
+  ])).values()];
+  const personalArtists = [...new Map(personalTracks.filter((song) => song.artist_name).map((song) => [
+    song.artist_name,
+    { name: song.artist_name, song },
+  ])).values()];
+
+  const renderSongRows = (items, emptyMessage) => items.length ? (
+    <div className="song-list">
+      {items.map((song, index) => {
+        const liked = likedSongs.some((item) => item.id === song.id);
+        return (
+          <article key={`${song.id}-${index}`} className={currentSong?.id === song.id ? 'library-song active' : 'library-song'}>
+            <div className="song-mark" aria-hidden="true">♫</div>
+            <div className="library-song-info">
+              <strong>{song.title}</strong>
+              <span>{song.artist_name || 'Unknown Artist'}{song.album_title ? ` · ${song.album_title}` : ''}</span>
+            </div>
+            <span className="song-duration">{formatDuration(song.duration_seconds || 0)}</span>
+            <button type="button" className="inline-like" onClick={() => toggleSongLike(song)} aria-label={liked ? `Unlike ${song.title}` : `Like ${song.title}`} aria-pressed={liked}>{liked ? '♥' : '♡'}</button>
+            <button type="button" className="song-play" onClick={() => playSong(song, items)} aria-label={`Play ${song.title}`}>▶</button>
+          </article>
+        );
+      })}
+    </div>
+  ) : <p className="library-empty">{emptyMessage}</p>;
 
   const playNextSong = () => {
     const nextIndex = queueIndex + 1;
@@ -841,25 +990,50 @@ export default function App() {
             <p className="eyebrow">Good evening</p>
             <h1>{user.username || user.full_name || 'Sungg'}</h1>
           </div>
-          <button className="profile-pill" onClick={() => setShowSidebar(true)} aria-label="Open profile and settings">A</button>
+          <div className="topbar-actions">
+            <button type="button" className="icon-action" onClick={() => setActiveTab('search')} aria-label="Search music">⌕</button>
+            <button className="profile-pill" onClick={() => setShowSidebar(true)} aria-label="Open profile and settings">{(user.username || user.full_name || 'S').slice(0, 1).toUpperCase()}</button>
+          </div>
         </header>
 
         <main className="main-content">
+          {activeTab === 'home' && <>
           <section className="hero-card">
             <div className="hero-copy">
-              <p className="eyebrow muted">Local library</p>
-              <h2>Your music</h2>
+              <p className="eyebrow muted">Your listening, your library</p>
+              <h2>Find your next favorite</h2>
+              <button type="button" className="text-btn hero-search" onClick={() => setActiveTab('search')}>Search your music →</button>
             </div>
-            <button type="button" className="primary-btn compact" onClick={() => songs[0] && playSong(songs[0])} disabled={!songs.length}>Play</button>
+            <div className="hero-note" aria-hidden="true">♫</div>
           </section>
 
-          {hasSearched && <section className="stats-grid">
+          <section className="home-section">
+            <div className="section-head"><h3>Made for you</h3><button type="button" onClick={() => setActiveTab('library')}>Your library</button></div>
+            <div className="discovery-grid">
+              <button type="button" className="feature-tile liked-tile" onClick={() => { setLibrarySection('liked'); setActiveTab('library'); }}><span className="tile-art liked-art">♥</span><strong>Liked Songs</strong><small>{likedSongs.length} saved</small></button>
+              <button type="button" className="feature-tile recent-tile" onClick={() => { setLibrarySection('recent'); setActiveTab('library'); }}><span className="tile-art recent-art">↻</span><strong>Recently Played</strong><small>{recentTracks.length} tracks</small></button>
+            </div>
+          </section>
+
+          <section className="home-section">
+            <div className="section-head"><h3>Recommended for you</h3></div>
+            {recommendations.length ? <div className="horizontal-scroll">
+              {recommendations.slice(0, 8).map((song) => <button type="button" key={song.id} className="discovery-card" onClick={() => playSong(song, recommendations)}><div className="discovery-art">{song.cover_url ? <img src={song.cover_url} alt="" /> : <span>♫</span>}</div><strong>{song.title}</strong><small>{song.artist_name || 'Unknown Artist'}</small></button>)}
+            </div> : <p className="library-empty">{isLoadingLibrary ? 'Loading recommendations...' : 'Discover more music to build personalized recommendations.'}</p>}
+          </section>
+
+          <section className="home-section"><div className="section-head"><h3>Recently played</h3><button type="button" onClick={() => { setLibrarySection('recent'); setActiveTab('library'); }}>See all</button></div>{renderSongRows(recentTracks.slice(0, 4), isLoadingLibrary ? 'Loading listening history...' : 'Nothing played yet.')}</section>
+
+          <section className="home-section"><div className="section-head"><h3>Your playlists</h3><button type="button" onClick={() => { setLibrarySection('playlists'); setActiveTab('library'); }}>See all</button></div>{playlists.length ? <div className="playlist-grid">{playlists.slice(0, 4).map((playlist) => <article key={playlist.id} className="playlist-card"><div className="playlist-icon">♫</div><div><h4>{playlist.name}</h4><p>{playlist.description || 'Your playlist'}</p></div></article>)}</div> : <p className="library-empty">Create your first playlist to collect songs here.</p>}</section>
+          </>}
+
+          {activeTab === 'search' && hasSearched && <section className="stats-grid">
             <div className="stat-box"><strong>{hasSearched ? songs.length : recentSearches.length}</strong><span>{hasSearched ? 'Search results' : 'Recent searches'}</span></div>
             <div className="stat-box"><strong>{hasSearched ? new Set(songs.map((song) => song.artist_name).filter(Boolean)).size : ' '}</strong><span>{hasSearched ? 'Artists' : ' '}</span></div>
             <div className="stat-box"><strong>{hasSearched ? new Set(songs.map((song) => song.audio_format).filter(Boolean)).size : ' '}</strong><span>{hasSearched ? 'Formats' : ' '}</span></div>
           </section>}
 
-          <section className="panel">
+          {activeTab === 'search' && <section className="panel">
             <div className="section-head">
               <h3>Music library</h3>
               <span className="catalog-count">{hasSearched ? `${songs.length} results` : ''}</span>
@@ -947,7 +1121,18 @@ export default function App() {
                 </article>
               ))}
             </div>}
-          </section>
+          </section>}
+
+          {activeTab === 'library' && <section className="library-page">
+            <div className="library-heading"><div><p className="eyebrow">Your collection</p><h2>Library</h2></div><span>{likedSongs.length} liked · {recentTracks.length} recent</span></div>
+            <div className="library-tabs" role="tablist" aria-label="Library sections">{[['liked', 'Liked Songs'], ['recent', 'Recently Played'], ['playlists', 'Playlists'], ['albums', 'Albums'], ['artists', 'Artists']].map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={librarySection === key} className={librarySection === key ? 'library-tab active' : 'library-tab'} onClick={() => setLibrarySection(key)}>{label}</button>)}</div>
+            {isLoadingLibrary && <p className="catalog-status">Loading your library...</p>}{libraryError && <p className="catalog-status error-text">{libraryError}</p>}
+            {librarySection === 'liked' && <><div className="liked-heading"><div className="liked-cover">♥</div><div><p className="eyebrow">Personal playlist</p><h3>Liked Songs</h3><span>{likedSongs.length} songs</span></div></div>{likedSongs.length > 0 && <div className="library-actions"><button type="button" className="primary-btn compact" onClick={() => playSongs(likedSongs)}>Play all</button><button type="button" className="secondary-btn" onClick={() => playSongs(likedSongs, true)}>Shuffle</button></div>}{renderSongRows(likedSongs, 'Your liked songs will appear here. Tap the heart on any song to save it.')}</>}
+            {librarySection === 'recent' && renderSongRows(recentTracks, 'Nothing played yet.')}
+            {librarySection === 'playlists' && (playlists.length ? <div className="playlist-grid">{playlists.map((playlist) => <article key={playlist.id} className="playlist-card"><div className="playlist-icon">♫</div><div><h4>{playlist.name}</h4><p>{playlist.description || 'Your playlist'}</p></div></article>)}</div> : <p className="library-empty">Create your first playlist to start a collection.</p>)}
+            {librarySection === 'albums' && (personalAlbums.length ? <div className="horizontal-scroll">{personalAlbums.map(({ title, artist, song }) => <button key={`${title}-${artist}`} type="button" className="discovery-card" onClick={() => playSongs(personalTracks.filter((track) => track.album_title === title))}><div className="discovery-art">{song.cover_url ? <img src={song.cover_url} alt="" /> : <span>♫</span>}</div><strong>{title}</strong><small>{artist}</small></button>)}</div> : <p className="library-empty">Albums from your liked songs and listening history will appear here.</p>)}
+            {librarySection === 'artists' && (personalArtists.length ? <div className="artist-grid">{personalArtists.map(({ name }) => <button key={name} type="button" className="artist-tile" onClick={() => playSongs(personalTracks.filter((song) => song.artist_name === name))}><span className="artist-avatar">{name.slice(0, 1).toUpperCase()}</span><strong>{name}</strong></button>)}</div> : <p className="library-empty">Artists from your liked songs and listening history will appear here.</p>)}
+          </section>}
         </main>
 
         {currentSong && (
@@ -957,6 +1142,7 @@ export default function App() {
               <strong>{currentSong.title}</strong>
               <span>{currentSong.artist_name || 'Unknown Artist'}</span>
             </div>
+            <button type="button" className={currentSongLiked ? 'player-like active' : 'player-like'} onClick={() => toggleSongLike(currentSong)} aria-label={currentSongLiked ? 'Unlike song' : 'Like song'} aria-pressed={currentSongLiked} disabled={isUpdatingLike}>{currentSongLiked ? '♥' : '♡'}</button>
             <button type="button" className="mini-play" onClick={togglePlayback} aria-label={isPlaying ? 'Pause' : 'Play'}>
               {isPlaying ? '❚❚' : '▶'}
             </button>
@@ -1001,20 +1187,17 @@ export default function App() {
         />
 
         <nav className="bottom-nav" aria-label="Main navigation">
-          <button type="button" className="nav-item active">
+          <button type="button" className={activeTab === 'home' ? 'nav-item active' : 'nav-item'} onClick={() => setActiveTab('home')}>
             <span>Home</span>
           </button>
           <button
             type="button"
-            className="nav-item"
-            onClick={() => {
-              searchInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              searchInputRef.current?.focus();
-            }}
+            className={activeTab === 'search' ? 'nav-item active' : 'nav-item'}
+            onClick={() => setActiveTab('search')}
           >
             <span>Search</span>
           </button>
-          <button type="button" className="nav-item">
+          <button type="button" className={activeTab === 'library' ? 'nav-item active' : 'nav-item'} onClick={() => setActiveTab('library')}>
             <span>Library</span>
           </button>
         </nav>

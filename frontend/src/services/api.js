@@ -46,3 +46,55 @@ export async function recordSearchQuery(query, token) {
     body: JSON.stringify({ query }),
   });
 }
+
+export async function fetchLikedSongs(token) {
+  return getJson('/users/me/liked-songs', 'Library could not be loaded.', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export async function updateSongLike(songId, liked, token) {
+  return getJson(
+    `/songs/${encodeURIComponent(songId)}/like`,
+    "Couldn't update liked songs. Try again.",
+    {
+      method: liked ? 'POST' : 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+}
+
+export async function fetchSongLikeStatus(songId, token) {
+  return getJson(`/songs/${encodeURIComponent(songId)}/like-status`, 'Like status could not be loaded.', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export async function fetchListeningHistory(token) {
+  return getJson('/users/me/listening-history?limit=30', 'Listening history could not be loaded.', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export async function recordListeningHistory(songId, token) {
+  return getJson('/users/me/listening-history', 'Listening history could not be saved.', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ song_id: songId }),
+  });
+}
+
+export async function fetchRecommendations(token) {
+  return getJson('/recommendations/?limit=8', 'Recommendations could not be loaded.', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export async function fetchPlaylists(token) {
+  return getJson('/playlists/', 'Playlists could not be loaded.', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}

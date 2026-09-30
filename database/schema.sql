@@ -58,3 +58,13 @@ CREATE TABLE IF NOT EXISTS listening_history (
     song_id VARCHAR(255) NOT NULL,
     played_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS liked_songs (
+    id VARCHAR(255) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    song_id VARCHAR(255) NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_liked_song_user_song UNIQUE (user_id, song_id)
+);
+
+CREATE INDEX IF NOT EXISTS ix_liked_songs_user_id ON liked_songs(user_id);

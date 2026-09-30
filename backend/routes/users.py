@@ -1,11 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from config.database import get_db
+from models.album import Album
+from models.artist import Artist
+from models.history import ListeningHistory, SearchHistory
+from models.song import Song
+from repositories.likes_repository import LikesRepository
 from repositories.user_repository import UserRepository
 from schemas.user_schema import (
     ProfileUpdateRequest,
     SearchHistoryCreate,
+    SongHistoryCreate,
     UserPrivacyUpdate,
     UserPreferencesUpdate,
 )
@@ -13,6 +21,19 @@ from utils.jwt import decode_access_token
 
 router = APIRouter()
 security = HTTPBearer()
+
+
+def _library_song(song, artist_name, album_title):
+    return {
+        "id": song.id,
+        "title": song.title,
+        "artist_name": artist_name,
+        "album_title": album_title,
+        "genre": song.genre,
+        "duration_seconds": song.duration_seconds or 0,
+        "audio_format": song.audio_format,
+        "cover_url": song.cover_url,
+    }
 
 
 def get_authenticated_user(
@@ -160,6 +181,65 @@ def clear_listening_history(db=Depends(get_db), current_user=Depends(get_authent
     repo = UserRepository(db)
     deleted = repo.delete_listening_history(current_user.email)
     return {"deleted": deleted, "message": "Listening history cleared."}
+
+
+@router.get("/me/listening-history")
+def get_listening_history(
+    limit: int = Query(30, ge=1, le=100),
+    db=Depends(get_db),
+    current_user=Depends(get_authenticated_user),
+):
+    privacy = UserRepository(db).get_privacy(current_user.email)
+    if not privacy.listening_history_enabled:
+        return {"items": []}
+    rows = db.query(ListeningHistory, Song, Artist.name, Album.title).join(
+        Song, Song.id == ListeningHistory.song_id
+    ).outerjoin(Artist, Artist.id == Song.artist_id).outerjoin(
+        Album, Album.id == Song.album_id
+    ).filter(ListeningHistory.user_id == current_user.id).order_by(
+        ListeningHistory.played_at.desc()
+    ).limit(limit).all()
+    return {"items": [_library_song(song, artist_name, album_title) for _, song, artist_name, album_title in rows]}
+
+
+@router.post("/me/listening-history")
+def record_listening_history(
+    payload: SongHistoryCreate,
+    db=Depends(get_db),
+    current_user=Depends(get_authenticated_user),
+):
+    song_exists = db.query(Song.id).filter(
+        Song.id == payload.song_id,
+        Song.file_path.is_not(None),
+    ).first()
+    if song_exists is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Song not found.")
+    privacy = UserRepository(db).get_privacy(current_user.email)
+    if not privacy.listening_history_enabled:
+        return {"recorded": False}
+    db.add(ListeningHistory(id=str(uuid.uuid4()), user_id=current_user.id, song_id=payload.song_id))
+    db.commit()
+    return {"recorded": True}
+
+
+@router.get("/me/liked-songs")
+def get_liked_songs(
+    limit: int = Query(200, ge=1, le=500),
+    db=Depends(get_db),
+    current_user=Depends(get_authenticated_user),
+):
+    likes = LikesRepository(db).list_for_user(current_user.id, limit=limit)
+    song_ids = [like.song_id for like in likes]
+    if not song_ids:
+        return {"items": [], "total": 0}
+    rows = db.query(Song, Artist.name, Album.title).outerjoin(
+        Artist, Artist.id == Song.artist_id
+    ).outerjoin(Album, Album.id == Song.album_id).filter(
+        Song.id.in_(song_ids), Song.file_path.is_not(None)
+    ).all()
+    by_id = {song.id: _library_song(song, artist_name, album_title) for song, artist_name, album_title in rows}
+    items = [by_id[song_id] for song_id in song_ids if song_id in by_id]
+    return {"items": items, "total": len(items)}
 
 
 @router.delete("/me/search-history")

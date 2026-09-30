@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.sql import func
 
 from config.database import Base
@@ -11,6 +11,16 @@ class ListeningHistory(Base):
     user_id = Column(String, nullable=False)
     song_id = Column(String, nullable=False)
     played_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class LikedSong(Base):
+    __tablename__ = "liked_songs"
+    __table_args__ = (UniqueConstraint("user_id", "song_id", name="uq_liked_song_user_song"),)
+
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    song_id = Column(String, ForeignKey("songs.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class SearchHistory(Base):
