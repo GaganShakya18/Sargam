@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 import { API_BASE_URL } from './services/apiConfig';
-import { fetchSearchHistory, fetchSearchResults, recordSearchQuery } from './services/api';
+import { fetchSearchHistory, fetchSearchResults, fetchSearchSuggestions, recordSearchQuery } from './services/api';
 
 const initialForm = { email: '', username: '', full_name: '', password: '' };
 const defaultPreferences = {
@@ -61,6 +61,10 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
   const [recentSearches, setRecentSearches] = useState([]);
+  const [suggestions, setSuggestions] = useState([]);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState('');
+  const [suggestionRetry, setSuggestionRetry] = useState(0);
   const [songError, setSongError] = useState('');
   const [isLoadingSongs, setIsLoadingSongs] = useState(false);
   const [currentSong, setCurrentSong] = useState(null);
@@ -72,6 +76,7 @@ export default function App() {
   const audioRef = useRef(null);
   const searchInputRef = useRef(null);
   const endedHandledRef = useRef(false);
+  const searchRequestIdRef = useRef(0);
   const [isLoading, setIsLoading] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -174,6 +179,38 @@ export default function App() {
     };
   }, [token, Boolean(user), privacy.search_history_enabled]);
 
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (query.length < 2 || hasSearched) {
+      setSuggestions([]);
+      setIsLoadingSuggestions(false);
+      setSuggestionsError('');
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      setIsLoadingSuggestions(true);
+      setSuggestionsError('');
+      try {
+        const data = await fetchSearchSuggestions(query, controller.signal);
+        if (!controller.signal.aborted) setSuggestions(data.suggestions || []);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setSuggestions([]);
+          setSuggestionsError(error.message || 'Music server is unavailable.');
+        }
+      } finally {
+        if (!controller.signal.aborted) setIsLoadingSuggestions(false);
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [searchQuery, hasSearched, suggestionRetry]);
+
   const performSongSearch = async (query) => {
     const normalizedQuery = query.trim();
     if (!normalizedQuery) {
@@ -183,6 +220,7 @@ export default function App() {
       return;
     }
 
+    setHasSearched(true);
     setSongError('');
     setIsLoadingSongs(true);
     try {
@@ -202,8 +240,10 @@ export default function App() {
           setSongError('Search completed, but search history could not be saved.');
         }
       }
+      return data.results || [];
     } catch (error) {
       setSongError(error.message || 'Music library could not be loaded.');
+      return [];
     } finally {
       setIsLoadingSongs(false);
     }
@@ -212,6 +252,17 @@ export default function App() {
   const handleSongSearch = (event) => {
     event.preventDefault();
     performSongSearch(searchQuery);
+  };
+
+  const selectSuggestion = async (suggestion) => {
+    const query = suggestion.type === 'song' ? suggestion.title : suggestion.name;
+    setSearchQuery(query);
+    setSuggestions([]);
+    const results = await performSongSearch(query);
+    if (suggestion.type === 'song') {
+      const selectedSong = results.find((song) => song.id === suggestion.id);
+      if (selectedSong) playSong(selectedSong, results);
+    }
   };
 
   const playSong = async (song, queue = songs) => {
@@ -824,9 +875,10 @@ export default function App() {
                   setSearchQuery(value);
                   setHasSearched(false);
                   setSongs([]);
-                  if (!value.trim()) {
-                    setSongError('');
-                  }
+                  setSongError('');
+                  setSuggestions([]);
+                  setSuggestionsError('');
+                  setIsLoadingSuggestions(value.trim().length >= 2);
                 }}
                 placeholder="Search songs, artists, albums, or genres"
               />
@@ -834,7 +886,42 @@ export default function App() {
             </form>
             {songError && <p className="catalog-status error-text" role="alert">{songError}</p>}
             {isLoadingSongs && <p className="catalog-status">Loading music library...</p>}
-            {!hasSearched && !isLoadingSongs && privacy.search_history_enabled && (
+            {!hasSearched && searchQuery.trim().length >= 2 && isLoadingSuggestions && (
+              <p className="catalog-status" role="status">Searching your music...</p>
+            )}
+            {!hasSearched && searchQuery.trim().length === 1 && (
+              <p className="catalog-status">Type one more character to search.</p>
+            )}
+            {!hasSearched && searchQuery.trim().length >= 2 && suggestionsError && (
+              <div className="suggestion-error" role="alert">
+                <span>{suggestionsError}</span>
+                <button type="button" onClick={() => setSuggestionRetry((retry) => retry + 1)}>Retry</button>
+              </div>
+            )}
+            {!hasSearched && searchQuery.trim().length >= 2 && !isLoadingSuggestions && !suggestionsError && suggestions.length === 0 && (
+              <p className="catalog-status">No results found</p>
+            )}
+            {!hasSearched && searchQuery.trim().length >= 2 && suggestions.length > 0 && (
+              <div className="suggestion-list" role="listbox" aria-label="Search suggestions">
+                {suggestions.map((suggestion) => (
+                  <button
+                    key={`${suggestion.type}-${suggestion.id}`}
+                    type="button"
+                    className="suggestion-item"
+                    role="option"
+                    onClick={() => selectSuggestion(suggestion)}
+                  >
+                    <span className="suggestion-kind">{suggestion.type}</span>
+                    <span className="suggestion-copy">
+                      <strong>{suggestion.title || suggestion.name}</strong>
+                      {suggestion.type === 'song' && <small>{suggestion.artist || 'Unknown Artist'}{suggestion.album ? ` · ${suggestion.album}` : ''}</small>}
+                      {suggestion.type === 'album' && suggestion.artist && <small>{suggestion.artist}</small>}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {!hasSearched && !searchQuery.trim() && !isLoadingSongs && privacy.search_history_enabled && (
               <div className="recent-searches">
                 <h4>Recent searches</h4>
                 {recentSearches.length ? recentSearches.map((item) => (
@@ -845,7 +932,7 @@ export default function App() {
                 )) : <p className="catalog-status">Your recent searches will appear here.</p>}
               </div>
             )}
-            {!hasSearched && !privacy.search_history_enabled && <p className="catalog-status">Search history is turned off.</p>}
+            {!hasSearched && !searchQuery.trim() && !privacy.search_history_enabled && <p className="catalog-status">Search history is turned off.</p>}
             {hasSearched && !isLoadingSongs && !songs.length && <p className="catalog-status">No songs match that search.</p>}
             {hasSearched && <div className="song-list">
               {songs.map((song) => (

@@ -22,6 +22,14 @@ export async function fetchSearchResults(query) {
   return getJson(`/search/?q=${encodeURIComponent(query)}`, 'Music library could not be searched.');
 }
 
+export async function fetchSearchSuggestions(query, signal) {
+  return getJson(
+    `/search/suggestions?q=${encodeURIComponent(query)}`,
+    'Search suggestions could not be loaded.',
+    { signal },
+  );
+}
+
 export async function fetchSearchHistory(token) {
   return getJson('/users/me/search-history', 'Search history could not be loaded.', {
     headers: { Authorization: `Bearer ${token}` },

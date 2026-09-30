@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from config.database import Base, get_db
 from config.settings import settings
-from models import Artist, Song
+from models import Album, Artist, Song
 from routes.search import router as search_router
 from routes.songs import router as songs_router
 from services import library_scanner
@@ -111,6 +111,57 @@ def test_empty_library_scans_without_creating_records(music_client):
         assert database.query(Song).count() == 0
     finally:
         database.close()
+
+
+def test_suggestions_rank_catalog_matches_and_return_song_artist_album_types(music_client, tmp_path):
+    client, test_sessions = music_client
+    database = test_sessions()
+    try:
+        artist = Artist(id="artist-mahiya", name="Mahiya Artist")
+        album = Album(id="album-mahiya", title="Mahiya Album", artist_id=artist.id)
+        rows = [
+            Song(
+                id="song-prefix",
+                title="Mahiya - PagalNew",
+                artist_id=artist.id,
+                album_id=album.id,
+                file_path=str(tmp_path / "prefix.mp3"),
+            ),
+            Song(
+                id="song-partial",
+                title="A Song About Mahiya",
+                artist_id=artist.id,
+                album_id=album.id,
+                file_path=str(tmp_path / "partial.mp3"),
+            ),
+        ]
+        database.add_all([artist, album, *rows])
+        database.commit()
+    finally:
+        database.close()
+
+    response = client.get("/api/search/suggestions", params={"q": "mahi"})
+    assert response.status_code == 200
+    suggestions = response.json()["suggestions"]
+    assert suggestions[0] == {
+        "type": "song",
+        "id": "song-prefix",
+        "title": "Mahiya - PagalNew",
+        "artist": "Mahiya Artist",
+        "album": "Mahiya Album",
+    }
+    assert {item["type"] for item in suggestions} == {"song", "artist", "album"}
+    assert len(suggestions) <= 8
+
+
+def test_suggestions_require_two_characters_and_limit_results(music_client):
+    client, _ = music_client
+    short_query = client.get("/api/search/suggestions", params={"q": "m"})
+    assert short_query.status_code == 422
+
+    bounded = client.get("/api/search/suggestions", params={"q": "mahi", "limit": 2})
+    assert bounded.status_code == 200
+    assert bounded.json()["suggestions"] == []
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient

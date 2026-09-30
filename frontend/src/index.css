@@ -536,6 +536,73 @@ h3 {
   cursor: pointer;
 }
 
+.suggestion-list {
+  display: grid;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.suggestion-item {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 2px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.suggestion-kind {
+  color: var(--primary-bright);
+  font-size: 0.7rem;
+  text-transform: capitalize;
+}
+
+.suggestion-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.suggestion-copy strong,
+.suggestion-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestion-copy strong {
+  font-size: 0.88rem;
+}
+
+.suggestion-copy small {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.suggestion-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #fca5a5;
+  font-size: 0.84rem;
+}
+
+.suggestion-error button {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
 .bottom-nav {
   position: sticky;
   bottom: 8px;
