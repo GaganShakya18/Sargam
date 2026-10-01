@@ -98,3 +98,29 @@ export async function fetchPlaylists(token) {
     headers: { Authorization: `Bearer ${token}` },
   });
 }
+
+export async function createPlaylist(payload, token) {
+  return getJson('/playlists/', "Couldn't create playlist.", {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function addSongToPlaylist(playlistId, songId, token) {
+  return getJson(
+    `/playlists/${encodeURIComponent(playlistId)}/songs`,
+    "Couldn't add song to playlist.",
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ song_id: songId }),
+    },
+  );
+}

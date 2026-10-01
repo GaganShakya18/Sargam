@@ -16,7 +16,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
         "http://192.168.137.1:5173",
     ]
-    cors_allowed_origin_regex: str = r"(http://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+):(517[3-9]|51[89]\d)|https://localhost)"
+    cors_allowed_origin_regex: str = r"(http://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+):(517[3-9]|51[89]\d)|https://localhost)"
 
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parents[1] / ".env",

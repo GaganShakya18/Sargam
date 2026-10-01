@@ -19,3 +19,7 @@ class PlaylistOut(PlaylistBase):
 
     class Config:
         from_attributes = True
+
+
+class PlaylistSongCreate(BaseModel):
+    song_id: str

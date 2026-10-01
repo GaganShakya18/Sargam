@@ -10,6 +10,8 @@ import {
   fetchSearchResults,
   fetchSearchSuggestions,
   fetchSongLikeStatus,
+  addSongToPlaylist,
+  createPlaylist,
   recordListeningHistory,
   recordSearchQuery,
   updateSongLike,
@@ -87,6 +89,12 @@ export default function App() {
   const [recentTracks, setRecentTracks] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
   const [playlists, setPlaylists] = useState([]);
+  const [showPlaylistSheet, setShowPlaylistSheet] = useState(false);
+  const [playlistSheetMode, setPlaylistSheetMode] = useState('select');
+  const [playlistTargetSong, setPlaylistTargetSong] = useState(null);
+  const [playlistForm, setPlaylistForm] = useState({ name: '', description: '' });
+  const [playlistFeedback, setPlaylistFeedback] = useState('');
+  const [isPlaylistActionPending, setIsPlaylistActionPending] = useState(false);
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [libraryError, setLibraryError] = useState('');
   const [isUpdatingLike, setIsUpdatingLike] = useState(false);
@@ -395,6 +403,54 @@ export default function App() {
       setMessage("Couldn't update liked songs. Try again.");
     } finally {
       setIsUpdatingLike(false);
+    }
+  };
+
+  const openPlaylistSheet = (song = null, mode = 'select') => {
+    setPlaylistTargetSong(song);
+    setPlaylistSheetMode(mode);
+    setPlaylistForm({ name: '', description: '' });
+    setPlaylistFeedback('');
+    setShowPlaylistSheet(true);
+  };
+
+  const createUserPlaylist = async (event) => {
+    event.preventDefault();
+    setIsPlaylistActionPending(true);
+    setPlaylistFeedback('');
+    try {
+      const playlist = await createPlaylist({
+        name: playlistForm.name.trim(),
+        description: playlistForm.description.trim() || null,
+      }, token);
+      setPlaylists((current) => [playlist, ...current]);
+      setPlaylistForm({ name: '', description: '' });
+      if (playlistTargetSong) {
+        setPlaylistSheetMode('select');
+        setPlaylistFeedback('Playlist created.');
+      } else {
+        setShowPlaylistSheet(false);
+        setMessage('Playlist created.');
+      }
+    } catch {
+      setPlaylistFeedback("Couldn't create playlist.");
+    } finally {
+      setIsPlaylistActionPending(false);
+    }
+  };
+
+  const addCurrentSongToPlaylist = async (playlist) => {
+    if (!playlistTargetSong || isPlaylistActionPending) return;
+    setIsPlaylistActionPending(true);
+    setPlaylistFeedback('');
+    try {
+      await addSongToPlaylist(playlist.id, playlistTargetSong.id, token);
+      setShowPlaylistSheet(false);
+      setMessage(`Added to ${playlist.name}`);
+    } catch {
+      setPlaylistFeedback("Couldn't add song to playlist.");
+    } finally {
+      setIsPlaylistActionPending(false);
     }
   };
 
@@ -985,10 +1041,11 @@ export default function App() {
   return (
     <div className="app-shell">
       <div className="music-app-shell">
-        <header className="topbar">
-          <div>
+        <header className="topbar home-greeting">
+          <div className="greeting-copy">
             <p className="eyebrow">Good evening</p>
             <h1>{user.username || user.full_name || 'Sungg'}</h1>
+            <p className="greeting-prompt">What do you feel like listening to?</p>
           </div>
           <div className="topbar-actions">
             <button type="button" className="icon-action" onClick={() => setActiveTab('search')} aria-label="Search music">⌕</button>
@@ -1124,7 +1181,7 @@ export default function App() {
           </section>}
 
           {activeTab === 'library' && <section className="library-page">
-            <div className="library-heading"><div><p className="eyebrow">Your collection</p><h2>Library</h2></div><span>{likedSongs.length} liked · {recentTracks.length} recent</span></div>
+            <div className="library-heading"><div><p className="eyebrow">Your collection</p><h2>Library</h2></div><div className="library-heading-actions"><span>{likedSongs.length} liked · {recentTracks.length} recent</span>{librarySection === 'playlists' && <button type="button" className="secondary-btn compact" onClick={() => openPlaylistSheet(null, 'create')}>Create Playlist</button>}</div></div>
             <div className="library-tabs" role="tablist" aria-label="Library sections">{[['liked', 'Liked Songs'], ['recent', 'Recently Played'], ['playlists', 'Playlists'], ['albums', 'Albums'], ['artists', 'Artists']].map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={librarySection === key} className={librarySection === key ? 'library-tab active' : 'library-tab'} onClick={() => setLibrarySection(key)}>{label}</button>)}</div>
             {isLoadingLibrary && <p className="catalog-status">Loading your library...</p>}{libraryError && <p className="catalog-status error-text">{libraryError}</p>}
             {librarySection === 'liked' && <><div className="liked-heading"><div className="liked-cover">♥</div><div><p className="eyebrow">Personal playlist</p><h3>Liked Songs</h3><span>{likedSongs.length} songs</span></div></div>{likedSongs.length > 0 && <div className="library-actions"><button type="button" className="primary-btn compact" onClick={() => playSongs(likedSongs)}>Play all</button><button type="button" className="secondary-btn" onClick={() => playSongs(likedSongs, true)}>Shuffle</button></div>}{renderSongRows(likedSongs, 'Your liked songs will appear here. Tap the heart on any song to save it.')}</>}
@@ -1137,17 +1194,18 @@ export default function App() {
 
         {currentSong && (
           <div className="mini-player" aria-label="Mini player">
-            <div className="mini-cover small" aria-hidden="true">♫</div>
+            <div className="mini-cover small" aria-hidden="true">{currentSong.cover_url ? <img src={currentSong.cover_url} alt="" /> : '♫'}</div>
             <div className="mini-meta">
               <strong>{currentSong.title}</strong>
               <span>{currentSong.artist_name || 'Unknown Artist'}</span>
             </div>
-            <button type="button" className={currentSongLiked ? 'player-like active' : 'player-like'} onClick={() => toggleSongLike(currentSong)} aria-label={currentSongLiked ? 'Unlike song' : 'Like song'} aria-pressed={currentSongLiked} disabled={isUpdatingLike}>{currentSongLiked ? '♥' : '♡'}</button>
-            <button type="button" className="mini-play" onClick={togglePlayback} aria-label={isPlaying ? 'Pause' : 'Play'}>
-              {isPlaying ? '❚❚' : '▶'}
-            </button>
-            <button type="button" className="queue-control" onClick={playPreviousSong} aria-label="Play previous song">|◀</button>
-            <button type="button" className="queue-control" onClick={playNextSong} aria-label="Play next song">▶|</button>
+            <div className="mini-controls">
+              <button type="button" className={currentSongLiked ? 'player-like active' : 'player-like'} onClick={() => toggleSongLike(currentSong)} aria-label={currentSongLiked ? 'Unlike song' : 'Like song'} aria-pressed={currentSongLiked} disabled={isUpdatingLike}>{currentSongLiked ? '♥' : '♡'}</button>
+              <button type="button" className="queue-control" onClick={playPreviousSong} aria-label="Play previous song">|◀</button>
+              <button type="button" className="mini-play" onClick={togglePlayback} aria-label={isPlaying ? 'Pause' : 'Play'}>{isPlaying ? '❚❚' : '▶'}</button>
+              <button type="button" className="queue-control" onClick={playNextSong} aria-label="Play next song">▶|</button>
+              <button type="button" className="playlist-add-button" onClick={() => openPlaylistSheet(currentSong)} aria-label="Add to Playlist" title="Add to Playlist">＋</button>
+            </div>
             <div className="player-seek">
               <span>{formatDuration(Math.floor(currentTime))}</span>
               <input
@@ -1202,6 +1260,46 @@ export default function App() {
           </button>
         </nav>
       </div>
+
+      {showPlaylistSheet && (
+        <div className="playlist-sheet-backdrop" onClick={() => setShowPlaylistSheet(false)}>
+          <section className="playlist-sheet" role="dialog" aria-modal="true" aria-labelledby="playlist-sheet-title" onClick={(event) => event.stopPropagation()}>
+            <div className="playlist-sheet-header">
+              <h2 id="playlist-sheet-title">{playlistSheetMode === 'create' ? 'Create Playlist' : 'Add to Playlist'}</h2>
+              <button type="button" className="icon-btn" onClick={() => setShowPlaylistSheet(false)} aria-label="Close playlist dialog">×</button>
+            </div>
+            {playlistSheetMode === 'create' ? (
+              <form className="playlist-create-form" onSubmit={createUserPlaylist}>
+                <label className="input-label">
+                  <span>Name</span>
+                  <input className="input-field" value={playlistForm.name} onChange={(event) => setPlaylistForm((current) => ({ ...current, name: event.target.value }))} maxLength={255} required />
+                </label>
+                <label className="input-label">
+                  <span>Description <small>(optional)</small></span>
+                  <textarea className="input-field textarea" value={playlistForm.description} onChange={(event) => setPlaylistForm((current) => ({ ...current, description: event.target.value }))} />
+                </label>
+                <button type="submit" className="primary-btn" disabled={isPlaylistActionPending}>{isPlaylistActionPending ? 'Creating...' : 'Create Playlist'}</button>
+              </form>
+            ) : (
+              <>
+                <button type="button" className="playlist-create-action" onClick={() => { setPlaylistSheetMode('create'); setPlaylistFeedback(''); }} disabled={isPlaylistActionPending}><span>＋</span>Create New Playlist</button>
+                <p className="playlist-sheet-label">My Playlists</p>
+                <div className="playlist-sheet-list">
+                  {playlists.map((playlist) => (
+                    <button key={playlist.id} type="button" className="playlist-option" onClick={() => addCurrentSongToPlaylist(playlist)} disabled={!playlistTargetSong || isPlaylistActionPending}>
+                      <span className="playlist-icon">♫</span>
+                      <span><strong>{playlist.name}</strong>{playlist.description && <small>{playlist.description}</small>}</span>
+                      <span className="playlist-option-action">{isPlaylistActionPending ? 'Adding...' : '＋'}</span>
+                    </button>
+                  ))}
+                  {!playlists.length && <p className="library-empty">No playlists yet. Create one to get started.</p>}
+                </div>
+              </>
+            )}
+            {playlistFeedback && <p className="playlist-feedback" role="status">{playlistFeedback}</p>}
+          </section>
+        </div>
+      )}
 
       {showSidebar && (
         <div className="sidebar-overlay" onClick={() => setShowSidebar(false)}>
@@ -1276,20 +1374,6 @@ export default function App() {
                 <label className="switch-row"><span>Push notifications</span><input type="checkbox" defaultChecked /></label>
                 <label className="switch-row"><span>New music alerts</span><input type="checkbox" defaultChecked /></label>
                 <label className="switch-row"><span>Playlist updates</span><input type="checkbox" defaultChecked /></label>
-              </div>
-
-              <div className="sidebar-section">
-                <div className="section-title">Storage / Server</div>
-                <div className="server-status-row">
-                  <span className="status-dot" />
-                  <span>{serverHealth ? 'Connected' : 'Offline'}</span>
-                </div>
-                <div className="setting-row">
-                  <span>Server</span>
-                  <strong>{API_BASE_URL}</strong>
-                </div>
-                <button type="button" className="sidebar-link" onClick={checkServerStatus}>Test connection</button>
-                <button type="button" className="sidebar-link" onClick={retryConnection}>Retry connection</button>
               </div>
 
               <div className="sidebar-section">

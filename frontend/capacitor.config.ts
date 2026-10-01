@@ -6,7 +6,9 @@ const config: CapacitorConfig = {
   webDir: 'dist',
   bundledWebRuntime: false,
   server: {
-    url: 'http://192.168.137.1:5175',
+    ...(process.env.CAPACITOR_DEV_SERVER_URL
+      ? { url: process.env.CAPACITOR_DEV_SERVER_URL }
+      : {}),
     androidScheme: 'http',
     cleartext: true,
   },
