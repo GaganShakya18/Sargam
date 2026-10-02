@@ -15,7 +15,21 @@ async function getJson(path, unavailableMessage, options = {}) {
 }
 
 export async function fetchSongs() {
-  return getJson('/songs/', 'Music library could not be loaded.');
+  const limit = 200;
+  const items = [];
+  let total = 0;
+
+  do {
+    const page = await getJson(
+      `/songs/?limit=${limit}&offset=${items.length}`,
+      'Music library could not be loaded.',
+    );
+    items.push(...page.items);
+    total = page.total;
+    if (!page.items.length) break;
+  } while (items.length < total);
+
+  return { items, total };
 }
 
 export async function fetchSearchResults(query) {

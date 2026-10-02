@@ -56,12 +56,17 @@ button:active {
 .app-shell {
   width: min(100%, 520px);
   max-width: 520px;
+  min-width: 0;
   margin: 0 auto;
   padding: max(12px, env(safe-area-inset-top)) clamp(12px, 4vw, 20px) calc(110px + env(safe-area-inset-bottom));
 }
 
 .music-app-shell {
   position: relative;
+  min-width: 0;
+}
+
+.main-content {
   min-width: 0;
 }
 
@@ -686,8 +691,19 @@ h3 {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  min-width: 0;
+  gap: 8px;
   margin-bottom: 14px;
   border: none;
+}
+
+.section-head h3 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.section-head > button {
+  flex: 0 0 auto;
 }
 
 .section-head a {
@@ -765,8 +781,16 @@ h3 {
   padding: 12px 14px;
 }
 
-.playlist-card div {
+.playlist-card > div:not(.playlist-icon) {
   flex: 1;
+  min-width: 0;
+}
+
+.playlist-card h4,
+.playlist-card p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .playlist-card span {
@@ -821,6 +845,9 @@ h3 {
   grid-template-areas: "art meta controls" "seek seek seek";
   align-items: center;
   gap: 8px 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   background: rgba(28, 25, 41, 0.94);
   border-radius: 18px;
   padding: 10px 12px;
@@ -832,7 +859,7 @@ h3 {
 .mini-cover.small { grid-area: art; overflow: hidden; }
 .mini-cover.small img { width: 100%; height: 100%; object-fit: cover; }
 .mini-meta { grid-area: meta; }
-.mini-controls { grid-area: controls; display: flex; align-items: center; gap: 3px; }
+.mini-controls { grid-area: controls; display: flex; align-items: center; gap: 3px; min-width: 0; }
 .player-seek { grid-area: seek; }
 
 .player-seek {
@@ -841,12 +868,18 @@ h3 {
   grid-template-columns: 34px minmax(0, 1fr) 34px;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   color: var(--muted);
   font-size: 0.68rem;
 }
 
+.player-seek span {
+  white-space: nowrap;
+}
+
 .player-seek input {
   width: 100%;
+  min-width: 0;
   accent-color: var(--primary-bright);
 }
 
@@ -1081,6 +1114,8 @@ h3 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+  width: 100%;
+  min-width: 0;
   background: rgba(20, 17, 29, 0.92);
   padding: 8px;
   border-radius: 18px;

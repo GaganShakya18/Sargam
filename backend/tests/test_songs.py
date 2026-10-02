@@ -81,6 +81,36 @@ def test_scan_is_idempotent_and_searchable(music_client, tmp_path, monkeypatch):
     assert streamed.content == b"audio bytes"
 
 
+def test_catalog_refresh_hides_removed_files_and_restores_readded_files(music_client, tmp_path, monkeypatch):
+    client, test_sessions = music_client
+    track = tmp_path / "Dynamic Track.mp3"
+    track.write_bytes(b"first audio bytes")
+    monkeypatch.setattr(
+        library_scanner,
+        "read_audio_metadata",
+        lambda path: ({"title": ["Dynamic Track"], "artist": ["Test Artist"]}, 180),
+    )
+
+    database = test_sessions()
+    try:
+        library_scanner.scan_music_library(database)
+        song_id = database.query(Song).one().id
+    finally:
+        database.close()
+
+    track.unlink()
+    removed_response = client.get("/api/songs/")
+    assert removed_response.status_code == 200
+    assert removed_response.json()["items"] == []
+    assert client.get(f"/api/songs/{song_id}/stream").status_code == 404
+
+    track.write_bytes(b"replacement audio bytes")
+    restored_response = client.get("/api/songs/")
+    assert restored_response.status_code == 200
+    assert [song["id"] for song in restored_response.json()["items"]] == [song_id]
+    assert client.get(f"/api/songs/{song_id}/stream").content == b"replacement audio bytes"
+
+
 def test_stream_supports_ranges_and_rejects_outside_paths(music_client, tmp_path):
     client, test_sessions = music_client
     safe_file = tmp_path / "safe.mp3"

@@ -54,6 +54,7 @@ def scan_music_library(database):
             continue
         files.append(resolved_path)
     files.sort()
+    discovered_paths = {str(path) for path in files}
 
     for path in files:
         stats["found"] += 1
@@ -99,10 +100,16 @@ def scan_music_library(database):
 
         file_path = str(path)
         song = database.query(Song).filter(Song.file_path == file_path).first()
+        if song is None:
+            song = database.query(Song).filter(
+                Song.id == _stable_id(f"song:{file_path}")
+            ).first()
         is_new = song is None
         if is_new:
             song = Song(id=_stable_id(f"song:{file_path}"), file_path=file_path)
             database.add(song)
+        else:
+            song.file_path = file_path
 
         song.title = title
         song.artist_id = artist.id
@@ -112,6 +119,10 @@ def scan_music_library(database):
         song.audio_format = path.suffix[1:].lower()
         song.file_size = file_size
         stats["added" if is_new else "updated"] += 1
+
+    for song in database.query(Song).filter(Song.file_path.is_not(None)).all():
+        if song.file_path not in discovered_paths:
+            song.file_path = None
 
     database.commit()
     return stats

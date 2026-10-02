@@ -7,6 +7,7 @@ import {
   fetchListeningHistory,
   fetchPlaylists,
   fetchRecommendations,
+  fetchSongs,
   fetchSearchHistory,
   fetchSearchResults,
   fetchSearchSuggestions,
@@ -55,8 +56,9 @@ function getStoredActiveAccount() {
 }
 
 function formatDuration(seconds) {
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
+  const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(totalSeconds / 60);
+  return `${minutes}:${String(totalSeconds % 60).padStart(2, '0')}`;
 }
 
 export default function App() {
@@ -73,6 +75,7 @@ export default function App() {
   const [serverHealth, setServerHealth] = useState(false);
   const [message, setMessage] = useState('');
   const [songs, setSongs] = useState([]);
+  const [catalogSongs, setCatalogSongs] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('home');
   const [librarySection, setLibrarySection] = useState('liked');
@@ -198,6 +201,26 @@ export default function App() {
 
     fetchProfile(token);
   }, [token]);
+
+  useEffect(() => {
+    if (!token || !user) {
+      setCatalogSongs([]);
+      return undefined;
+    }
+
+    let active = true;
+    fetchSongs()
+      .then((data) => {
+        if (active) setCatalogSongs(data.items || []);
+      })
+      .catch(() => {
+        if (active) setCatalogSongs([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [token, Boolean(user)]);
 
   useEffect(() => {
     if (!token || !user || !privacy.search_history_enabled) {
@@ -424,7 +447,7 @@ export default function App() {
     const results = await performSongSearch(query);
     if (suggestion.type === 'song') {
       const selectedSong = results.find((song) => song.id === suggestion.id);
-      if (selectedSong) playSong(selectedSong, results);
+      if (selectedSong) playCatalogSong(selectedSong, results);
     }
   };
 
@@ -515,6 +538,26 @@ export default function App() {
       setMessage("Couldn't update liked songs. Try again.");
     } finally {
       setIsUpdatingLike(false);
+    }
+  };
+
+  const playCatalogSong = async (song, fallbackQueue) => {
+    let queue = catalogSongs;
+    if (!queue.length) {
+      try {
+        const catalog = await fetchSongs();
+        queue = catalog.items || [];
+        if (queue.length) setCatalogSongs(queue);
+      } catch {
+        queue = fallbackQueue;
+      }
+    }
+
+    const queuedSong = queue.find((item) => item.id === song.id);
+    if (queuedSong) {
+      playSong(queuedSong, queue);
+    } else if (queue === fallbackQueue) {
+      playSong(song, fallbackQueue);
     }
   };
 
@@ -994,7 +1037,7 @@ export default function App() {
             <div className="brand-mark">S</div>
             <div>
               <p className="eyebrow">Premium listening</p>
-              <h1>Sungg</h1>
+              <h1>Sargam</h1>
             </div>
           </div>
 
@@ -1205,7 +1248,7 @@ export default function App() {
           <section className="home-section">
             <div className="section-head"><h3>Recommended for you</h3></div>
             {recommendations.length ? <div className="horizontal-scroll">
-              {recommendations.slice(0, 8).map((song) => <button type="button" key={song.id} className="discovery-card" onClick={() => playSong(song, recommendations)}><div className="discovery-art">{song.cover_url ? <img src={song.cover_url} alt="" /> : <span>♫</span>}</div><strong>{song.title}</strong><small>{song.artist_name || 'Unknown Artist'}</small></button>)}
+              {recommendations.slice(0, 8).map((song) => <button type="button" key={song.id} className="discovery-card" onClick={() => playCatalogSong(song, recommendations)}><div className="discovery-art">{song.cover_url ? <img src={song.cover_url} alt="" /> : <span>♫</span>}</div><strong>{song.title}</strong><small>{song.artist_name || 'Unknown Artist'}</small></button>)}
             </div> : <p className="library-empty">{isLoadingLibrary ? 'Loading recommendations...' : 'Discover more music to build personalized recommendations.'}</p>}
           </section>
 
@@ -1304,7 +1347,7 @@ export default function App() {
                     <span>{song.artist_name || 'Unknown Artist'}{song.album_title ? ` · ${song.album_title}` : ''}</span>
                   </div>
                   <span className="song-duration">{formatDuration(song.duration_seconds || 0)}</span>
-                  <button type="button" className="song-play" onClick={() => playSong(song, songs)} aria-label={`Play ${song.title}`}>▶</button>
+                  <button type="button" className="song-play" onClick={() => playCatalogSong(song, songs)} aria-label={`Play ${song.title}`}>▶</button>
                 </article>
               ))}
             </div>}

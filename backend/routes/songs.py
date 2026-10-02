@@ -12,6 +12,7 @@ from models.artist import Artist
 from repositories.likes_repository import LikesRepository
 from models.song import Song
 from routes.users import get_authenticated_user
+from services.library_scanner import scan_music_library
 
 router = APIRouter()
 
@@ -42,6 +43,8 @@ def list_songs(
     offset: int = Query(0, ge=0),
     database: Session = Depends(get_db),
 ):
+    if offset == 0:
+        scan_music_library(database)
     query = _catalog_query(database)
     total = query.count()
     rows = query.order_by(Song.title).offset(offset).limit(limit).all()

@@ -196,7 +196,10 @@ def get_listening_history(
         Song, Song.id == ListeningHistory.song_id
     ).outerjoin(Artist, Artist.id == Song.artist_id).outerjoin(
         Album, Album.id == Song.album_id
-    ).filter(ListeningHistory.user_id == current_user.id).order_by(
+    ).filter(
+        ListeningHistory.user_id == current_user.id,
+        Song.file_path.is_not(None),
+    ).order_by(
         ListeningHistory.played_at.desc()
     ).limit(limit).all()
     return {"items": [_library_song(song, artist_name, album_title) for _, song, artist_name, album_title in rows]}
