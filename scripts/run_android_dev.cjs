@@ -6,7 +6,7 @@ const frontendDirectory = resolve(__dirname, '..', 'frontend');
 const frontendRequire = createRequire(resolve(frontendDirectory, 'package.json'));
 const { loadEnv } = frontendRequire('vite');
 const { VITE_API_BASE_URL: apiBaseUrl } = loadEnv('development', frontendDirectory, 'VITE_');
-const port = Number(process.env.VITE_DEV_PORT || 5173);
+const port = Number(process.env.VITE_DEV_PORT || 5175);
 
 if (!apiBaseUrl) {
   throw new Error('VITE_API_BASE_URL is required in frontend/.env for Android development.');
@@ -14,6 +14,7 @@ if (!apiBaseUrl) {
 
 const apiUrl = new URL(apiBaseUrl);
 const host = apiUrl.hostname;
+const devServerUrl = `http://${host}:${port}`;
 
 if (['localhost', '127.0.0.1', '::1'].includes(host)) {
   throw new Error('VITE_API_BASE_URL must use the laptop LAN address for a physical Android device.');
@@ -46,7 +47,11 @@ async function main() {
   const child = spawn(
     process.execPath,
     [capacitorBin, 'run', 'android', '--live-reload', '--host', host, '--port', String(port)],
-    { cwd: frontendDirectory, stdio: 'inherit' },
+    {
+      cwd: frontendDirectory,
+      stdio: 'inherit',
+      env: { ...process.env, CAPACITOR_DEV_SERVER_URL: devServerUrl },
+    },
   );
 
   child.on('error', (error) => {

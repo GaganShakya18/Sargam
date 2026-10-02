@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 import { API_BASE_URL } from './services/apiConfig';
+import NativePlayback, { hasNativePlayback } from './services/nativePlayback';
 import {
   fetchLikedSongs,
   fetchListeningHistory,
@@ -102,9 +103,17 @@ export default function App() {
   const [playbackQueue, setPlaybackQueue] = useState([]);
   const [queueIndex, setQueueIndex] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [shuffleEnabled, setShuffleEnabled] = useState(false);
+  const [repeatMode, setRepeatMode] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const audioRef = useRef(null);
+  const tokenRef = useRef(token);
+  const nativeFallbackRef = useRef(false);
+  const nativePlaybackSyncInitializedRef = useRef(false);
+  const nativeSongIdRef = useRef(null);
+  tokenRef.current = token;
+  const isNativePlayback = hasNativePlayback();
   const searchInputRef = useRef(null);
   const endedHandledRef = useRef(false);
   const searchRequestIdRef = useRef(0);
@@ -265,6 +274,71 @@ export default function App() {
   }, [currentSong?.id, token]);
 
   useEffect(() => {
+    if (!isNativePlayback) return undefined;
+
+    let active = true;
+    let playbackListener;
+    const syncState = (state) => {
+      if (!active || nativeFallbackRef.current || !state) return;
+      const nextSong = state.currentSong || null;
+      if (!nativePlaybackSyncInitializedRef.current) {
+        nativePlaybackSyncInitializedRef.current = true;
+        nativeSongIdRef.current = nextSong?.id || null;
+      } else if (nativeSongIdRef.current !== (nextSong?.id || null)) {
+        nativeSongIdRef.current = nextSong?.id || null;
+        if (nextSong && tokenRef.current) {
+          setRecentTracks((current) => [nextSong, ...current.filter((item) => item.id !== nextSong.id)].slice(0, 30));
+          recordListeningHistory(nextSong.id, tokenRef.current)
+            .then(() => setLibraryRevision((revision) => revision + 1))
+            .catch(() => {});
+        }
+      }
+      setCurrentSong(nextSong);
+      setPlaybackQueue(state.queue || []);
+      setQueueIndex(Number.isInteger(state.currentIndex) ? state.currentIndex : -1);
+      setCurrentTime(state.position || 0);
+      setDuration(state.duration || 0);
+      setIsPlaying(Boolean(state.isPlaying));
+      setShuffleEnabled(Boolean(state.shuffleEnabled));
+      setRepeatMode(state.repeatMode || 0);
+      if (state.error) setSongError('Song could not be played.');
+    };
+    const refreshState = () => {
+      if (!nativeFallbackRef.current && !document.hidden) {
+        NativePlayback.getState().then(syncState).catch(() => {});
+      }
+    };
+    const refreshTimer = window.setInterval(refreshState, 1000);
+
+    NativePlayback.addListener('playbackState', syncState)
+      .then((listener) => {
+        if (active) playbackListener = listener;
+        else listener.remove();
+      })
+      .catch(() => {});
+    refreshState();
+    document.addEventListener('visibilitychange', refreshState);
+    window.addEventListener('focus', refreshState);
+
+    return () => {
+      active = false;
+      playbackListener?.remove();
+      document.removeEventListener('visibilitychange', refreshState);
+      window.removeEventListener('focus', refreshState);
+      window.clearInterval(refreshTimer);
+    };
+  }, [isNativePlayback]);
+
+  useEffect(() => {
+    if (!isNativePlayback || nativeFallbackRef.current || !currentSong) return;
+    NativePlayback.setOptions({
+      autoplay: preferences.autoplay,
+      shuffleEnabled,
+      repeatMode,
+    }).catch(() => {});
+  }, [isNativePlayback, currentSong?.id, preferences.autoplay, shuffleEnabled, repeatMode]);
+
+  useEffect(() => {
     if (activeTab === 'search') searchInputRef.current?.focus();
   }, [activeTab]);
 
@@ -354,19 +428,57 @@ export default function App() {
     }
   };
 
-  const playSong = async (song, queue = songs) => {
+  const playSong = async (song, queue = songs, nextShuffle = shuffleEnabled) => {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!isNativePlayback && !audio) return;
 
     const nextQueue = queue.length ? queue : [song];
     const nextIndex = nextQueue.findIndex((item) => item.id === song.id);
-    audio.pause();
     setPlaybackQueue(nextQueue);
     setQueueIndex(nextIndex);
     setCurrentSong(song);
+    setShuffleEnabled(nextShuffle);
     setCurrentTime(0);
     setDuration(song.duration_seconds || 0);
     setSongError('');
+
+    if (isNativePlayback && !nativeFallbackRef.current) {
+      nativePlaybackSyncInitializedRef.current = true;
+      nativeSongIdRef.current = song.id;
+      const nativeQueue = nextQueue.map((item) => ({
+        id: item.id,
+        title: item.title,
+        artist: item.artist_name || 'Unknown Artist',
+        album: item.album_title || '',
+        artworkUrl: item.cover_url ? new URL(item.cover_url, `${API_BASE_URL}/`).toString() : '',
+        durationSeconds: item.duration_seconds || 0,
+        audioFormat: item.audio_format || '',
+        streamUrl: `${API_BASE_URL}/songs/${encodeURIComponent(item.id)}/stream`,
+      }));
+      try {
+        const state = await NativePlayback.playQueue({
+          queue: nativeQueue,
+          index: Math.max(0, nextIndex),
+          autoplay: preferences.autoplay,
+          shuffleEnabled: nextShuffle,
+          repeatMode,
+        });
+        setIsPlaying(Boolean(state.isPlaying));
+        setRecentTracks((current) => [song, ...current.filter((item) => item.id !== song.id)].slice(0, 30));
+        recordListeningHistory(song.id, token)
+          .then(() => setLibraryRevision((revision) => revision + 1))
+          .catch(() => {});
+        return;
+      } catch {
+        setIsPlaying(false);
+        setSongError('Song could not be played.');
+        if (!audio) return;
+        nativeFallbackRef.current = true;
+        setSongError('');
+      }
+    }
+
+    audio.pause();
     audio.src = `${API_BASE_URL}/songs/${encodeURIComponent(song.id)}/stream`;
     audio.load();
     try {
@@ -459,7 +571,8 @@ export default function App() {
     const nextQueue = shuffle
       ? [...queue].sort(() => Math.random() - 0.5)
       : queue;
-    playSong(nextQueue[0], nextQueue);
+    setShuffleEnabled(shuffle);
+    playSong(nextQueue[0], nextQueue, shuffle);
   };
 
   const personalTracks = [...likedSongs, ...recentTracks].filter((song, index, rows) => (
@@ -495,6 +608,10 @@ export default function App() {
   ) : <p className="library-empty">{emptyMessage}</p>;
 
   const playNextSong = () => {
+    if (isNativePlayback && !nativeFallbackRef.current) {
+      NativePlayback.next().catch(() => setSongError('Song could not be played.'));
+      return;
+    }
     const nextIndex = queueIndex + 1;
     if (nextIndex < 0 || nextIndex >= playbackQueue.length) {
       audioRef.current?.pause();
@@ -505,6 +622,10 @@ export default function App() {
   };
 
   const playPreviousSong = () => {
+    if (isNativePlayback && !nativeFallbackRef.current) {
+      NativePlayback.previous().catch(() => setSongError('Song could not be played.'));
+      return;
+    }
     const audio = audioRef.current;
     if (audio && audio.currentTime > 3) {
       audio.currentTime = 0;
@@ -527,7 +648,16 @@ export default function App() {
 
   const togglePlayback = async () => {
     const audio = audioRef.current;
-    if (!audio || !currentSong) return;
+    if (!currentSong || (!isNativePlayback && !audio)) return;
+    if (isNativePlayback && !nativeFallbackRef.current) {
+      try {
+        const state = isPlaying ? await NativePlayback.pause() : await NativePlayback.play();
+        setIsPlaying(Boolean(state.isPlaying));
+      } catch {
+        setSongError('Song could not be played.');
+      }
+      return;
+    }
     if (audio.paused) {
       try {
         await audio.play();
@@ -1218,8 +1348,12 @@ export default function App() {
                 disabled={!duration && !currentSong.duration_seconds}
                 onChange={(event) => {
                   const nextTime = Number(event.target.value);
-                  audioRef.current.currentTime = nextTime;
                   setCurrentTime(nextTime);
+                  if (isNativePlayback && !nativeFallbackRef.current) {
+                    NativePlayback.seekTo({ position: nextTime }).catch(() => {});
+                  } else if (audioRef.current) {
+                    audioRef.current.currentTime = nextTime;
+                  }
                 }}
               />
               <span>{formatDuration(duration || currentSong.duration_seconds || 0)}</span>
