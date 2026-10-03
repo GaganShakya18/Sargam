@@ -58,7 +58,8 @@ http://<LAPTOP-IP>:8000
 
 Replace <LAPTOP-IP> with the laptop's current local network IP address.
 
-Application Architecture
+Application Architecture  
+
                     Android Phone
                          │
                          │ Wi-Fi
