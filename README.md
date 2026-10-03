@@ -58,24 +58,6 @@ http://<LAPTOP-IP>:8000
 
 Replace <LAPTOP-IP> with the laptop's current local network IP address.
 
-Application Architecture  
-
-                    Android Phone
-                         │
-                         │ Wi-Fi
-                         ▼
-                React + Capacitor
-                         │
-                         │ REST API
-                         ▼
-                   FastAPI Backend
-                    ┌────┴────┐
-                    │         │
-                    ▼         ▼
-                 SQLite    Music Files
-                              │
-                              ▼
-                       Local Music Folder
 
 The laptop acts as the music server. The Android application communicates with the FastAPI backend over the local network and streams audio from the laptop's music library.
 
