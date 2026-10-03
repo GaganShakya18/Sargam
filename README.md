@@ -1,3 +1,5 @@
+SARGAM(personal music stremaing app)
+
 The actual music folder can be configured through the backend environment settings.
 
 Supported audio formats include:
