@@ -1,99 +1,229 @@
-# MyMusicApp
+The actual music folder can be configured through the backend environment settings.
 
-A full-stack music streaming application inspired by Spotify, built with FastAPI, PostgreSQL, and a React frontend.
+Supported audio formats include:
 
-## Project structure
+MP3
+FLAC
+M4A
+WAV
 
-- `backend/` - API server, business logic, models, routes, and tests
-- `frontend/` - React app for the user interface
-- `database/` - SQL schema, migrations, and ER docs
-- `docs/` - architecture, use-cases, DSA, and design decisions
-- `storage/` - music and artwork files
-- `scripts/` - automation and maintenance utilities
+Audio files remain on the local filesystem while SQLite stores the required application and catalog data.
 
-## Tech stack
-
-- Backend: FastAPI, SQLAlchemy, PostgreSQL
-- Authentication: JWT
-- Frontend: React + Vite
-- Storage: local filesystem for media uploads
-
-## Getting started
-
-### Music library
-
-The backend reads audio files from `MUSIC_LIBRARY_PATH` (default:
-`C:\Users\Gagan\Downloads\music`). Override it in `backend/.env` when needed.
-Supported formats are MP3, FLAC, M4A, and WAV. Audio stays on disk; the configured
-SQLAlchemy database stores the catalog metadata and file references.
-
-Install backend dependencies once from the project root:
-
-```powershell
-backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
-```
-
-Scan or rescan the library after adding files:
-
-```powershell
-npm run scan:music
-```
-
-The Android/React app loads songs through `GET /api/songs/`, searches through the
-existing `GET /api/search/?q=...` endpoint, and plays `GET /api/songs/{song_id}/stream`.
-The stream endpoint confines resolved paths to `MUSIC_LIBRARY_PATH` and supports
-HTTP byte ranges for seeking. Set `VITE_API_BASE_URL` in `frontend/.env` to the
-FastAPI host reachable by the device; Android phones must use the laptop's
-LAN address, not `localhost`.
-
-### One-command development
-
-From the project root, run:
-
-```powershell
-npm run dev
-```
-
-This starts the existing FastAPI `--reload` process and Vite dev server. Configure
-`DATABASE_URL` in `backend/.env` for PostgreSQL before expecting the catalog to be
-stored in PostgreSQL. The current local environment is configured for SQLite and
-has no reachable PostgreSQL service, so it does not yet satisfy the PostgreSQL
-deployment requirement.
-
-### 1. Backend setup
-
-```bash
+1. Backend Setup
 cd backend
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+Activate the virtual environment on Windows:
+
+.\.venv\Scripts\activate
+
+Install dependencies:
+
 pip install -r requirements.txt
-```
 
-Copy the environment file and update it:
+Start the FastAPI server:
 
-```bash
-copy .env.example .env
-```
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
 
-Then run:
+The backend will be available at:
 
-```bash
-uvicorn main:app --reload
-```
+http://localhost:8000
+2. Frontend Setup
 
-### 2. Frontend setup
+Open another terminal:
 
-```bash
 cd frontend
 npm install
-npm run dev
-```
+npm run dev -- --host 0.0.0.0
 
-## Default admin credentials
+The Vite development server will be available on the configured development port.
 
-- Email: admin@example.com
-- Password: admin123
+3. Android Setup
 
-## Notes
+Sargam uses Capacitor to run the React application as an Android application.
 
-This project is intended as a structured starter and can be extended with playlists, recommendations, search indexes, media streaming, and production deployment.
+Sync the Android project:
+
+npx cap sync android
+
+For development, the Android device and laptop should be connected to the same local network.
+
+Example:
+
+Vite:
+http://<LAPTOP-IP>:5175
+
+FastAPI:
+http://<LAPTOP-IP>:8000
+
+Replace <LAPTOP-IP> with the laptop's current local network IP address.
+
+Application Architecture
+                    Android Phone
+                         │
+                         │ Wi-Fi
+                         ▼
+                React + Capacitor
+                         │
+                         │ REST API
+                         ▼
+                   FastAPI Backend
+                    ┌────┴────┐
+                    │         │
+                    ▼         ▼
+                 SQLite    Music Files
+                              │
+                              ▼
+                       Local Music Folder
+
+The laptop acts as the music server. The Android application communicates with the FastAPI backend over the local network and streams audio from the laptop's music library.
+
+API
+
+The application uses REST APIs for communication between the Android frontend and FastAPI backend.
+
+Examples include:
+
+GET /api/songs/
+GET /api/search/?q=<query>
+GET /api/songs/{song_id}/stream
+
+The Android application uses the laptop's LAN address when communicating with the backend. localhost should not be used from the Android device because it refers to the phone itself.
+
+Development
+
+For local development, run both the backend and frontend servers.
+
+Backend:
+
+cd backend
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
+
+Frontend:
+
+cd frontend
+npm run dev -- --host 0.0.0.0
+
+The Android application can then connect to the development servers through the laptop's local network address.
+
+Project Status
+
+🚧 Actively Developed
+
+Sargam is a personal full-stack Android project focused on mobile application development, REST APIs, client-server architecture, local media streaming, database management, authentication, and responsive UI development.
+
+Future Improvements
+Background playback and Android media controls
+Improved music recommendations
+Automatic music-server discovery
+Offline playback
+Enhanced playlist management
+Improved library organization
+Production deployment
+
+**One correction from your old README:** I deliberately removed **PostgreSQL, SQLAlchemy, and JWT** because your current project uses **SQLite**, and the README should accurately represent what you've actually built.
+
+Available next action: :contentReference[oaicite:0]{index=0}
+
+
+Architecture:
+
+                    Android Phone
+                         │
+                         │ Wi-Fi
+                         ▼
+                React + Capacitor
+                         │
+                         │ REST APIs
+                         ▼
+                   FastAPI Backend
+                    ┌────┴────┐
+                    │         │
+                    ▼         ▼
+                 SQLite    Music Files
+                              │
+                              ▼
+                       Local Music Folder
+
+
+
+The laptop acts as the music server. The Android application communicates with the FastAPI backend over the local network and streams music from the laptop's music library.
+
+
+
+
+
+Getting Started
+Backend Setup
+cd backend
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+
+Start the FastAPI server:
+
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
+Frontend Setup
+
+Open another terminal:
+
+cd frontend
+npm install
+npm run dev -- --host 0.0.0.0
+Android Setup
+
+Sargam uses Capacitor to run the React application as an Android application.
+
+Sync the Android project:
+
+npx cap sync android
+
+For development over Wi-Fi, connect the Android device and laptop to the same local network.
+
+Example:
+
+Vite:
+http://<LAPTOP-IP>:5175
+
+FastAPI:
+http://<LAPTOP-IP>:8000
+
+Replace <LAPTOP-IP> with the laptop's current local network IP address.
+
+API
+
+The Android application communicates with the FastAPI backend through REST APIs.
+
+Example endpoints:
+
+GET /api/songs/
+GET /api/search/?q=<query>
+GET /api/songs/{song_id}/stream
+Development
+
+Run the backend and frontend servers during development.
+
+Backend:
+
+cd backend
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
+
+Frontend:
+
+cd frontend
+npm run dev -- --host 0.0.0.0
+
+The Android application can then communicate with the development servers through the laptop's local network address.
+
+Project Status
+
+🚧 Actively Developed
+
+Sargam is a personal full-stack Android project focused on mobile application development, REST APIs, client-server architecture, local media streaming, database management, authentication, and responsive UI development.
+
+Future Improvements
+Background playback with Android media controls
+Improved music recommendations
+Automatic music-server discovery
+Offline playback
+Enhanced playlist and library management
